@@ -109,10 +109,7 @@ object Req {
     InetAddress.getLocalHost.getHostName
   }
 
-  def apply(original: Req, rewrite: List[LiftRules.RewritePF]): Req = 
-    this.apply(original, rewrite, Nil)
-
-  def apply(original: Req, rewrite: List[LiftRules.RewritePF], statelessTest: List[LiftRules.StatelessTestPF]): Req = {
+  def apply(original: Req, rewrite: List[LiftRules.RewritePF]): Req = {
 
     def processRewrite(path: ParsePath, params: Map[String, String]): RewriteResponse =
     NamedPF.applyBox(RewriteRequest(path, original.requestType, original.request), rewrite) match {
@@ -123,19 +120,11 @@ object Req {
 
     val rewritten = processRewrite(original.path, Map.empty)
 
-    val stateless = NamedPF.applyBox(rewritten.path.wholePath, statelessTest)
-
-    new Req(rewritten.path, original.contextPath, 
-            original.requestType, original.contentType, original.request,
-            original.nanoStart, original.nanoEnd, 
-            stateless openOr original.stateless_?,
-            original.paramCalculator, original.addlParams ++ rewritten.params)
+    new Req(rewritten.path, original.contextPath, original.requestType, original.contentType, original.request,
+      original.nanoStart, original.nanoEnd, original.paramCalculator, original.addlParams ++ rewritten.params)
   }
 
-  def apply(request: HTTPRequest, rewrite: List[LiftRules.RewritePF],  nanoStart: Long): Req = this.apply(request, rewrite, Nil, nanoStart)
-
-
-  def apply(request: HTTPRequest, rewrite: List[LiftRules.RewritePF], statelessTest: List[LiftRules.StatelessTestPF], nanoStart: Long): Req = {
+  def apply(request: HTTPRequest, rewrite: List[LiftRules.RewritePF], nanoStart: Long): Req = {
     val reqType = RequestType(request)
     val contextPath = LiftRules.calculateContextPath() openOr request.contextPath
     val turi = if (request.uri.length >= contextPath.length) request.uri.substring(contextPath.length) else ""
@@ -215,11 +204,9 @@ object Req {
       }
     }
 
-    val stateless = NamedPF.applyBox(rewritten.path.wholePath, statelessTest)
-
     new Req(rewritten.path, contextPath, reqType,
             contentType, request, nanoStart,
-            System.nanoTime, stateless openOr false, paramCalculator, Map())
+            System.nanoTime, paramCalculator, Map())
   }
 
   private def fixURI(uri: String) = uri indexOf ";jsessionid" match {
@@ -227,11 +214,8 @@ object Req {
     case x@_ => uri substring (0, x)
   }
 
-  /**
-   * Create a nil request... useful for testing
-   */
   def nil = new Req(NilPath, "", GetRequest, Empty, null,
-                    System.nanoTime, System.nanoTime, false,
+                    System.nanoTime, System.nanoTime,
                     () => ParamCalcInfo(Nil, Map.empty, Nil, Empty), Map())
 
   def parsePath(in: String): ParsePath = {
@@ -392,77 +376,38 @@ class Req(val path: ParsePath,
           val request: HTTPRequest,
           val nanoStart: Long,
           val nanoEnd: Long,
-          _stateless_? : Boolean,
           private[http] val paramCalculator: () => ParamCalcInfo,
           private[http] val addlParams: Map[String, String]) extends HasParams
 {
   override def toString = "Req(" + paramNames + ", " + params + ", " + path +
   ", " + contextPath + ", " + requestType + ", " + contentType + ")"
 
-  def this(_path: ParsePath,
-           _contextPath: String,
-          _requestType: RequestType,
-          _contentType: Box[String],
-          _request: HTTPRequest,
-          _nanoStart: Long,
-          _nanoEnd: Long,
-          _paramCalculator: () => ParamCalcInfo,
-          _addlParams: Map[String, String]) = this(_path,
-                                                   _contextPath,
-                                                   _requestType,
-                                                   _contentType,
-                                                   _request,
-                                                   _nanoStart,
-                                                   _nanoEnd,
-                                                   false,
-                                                   _paramCalculator,
-                                                   _addlParams)
-
-  /**
-   * Should the request be treated as stateless (no session created for it)?
-   */
-  lazy val stateless_? = {
-    val ret = _stateless_? || (location.map(_.stateless_?) openOr false)
-    ret
-  }
-
   /**
    * What is the content type in order of preference by the requestor
    */
-
-    lazy val weightedContentType: List[ContentType] = ContentType.parse(Box(headers("accept").mkString))
+  lazy val weightedContentType: List[ContentType] = ContentType.parse(contentType)
 
   /**
    * Returns true if the content-type is text/xml
    */
-  lazy val xml_? = (weightedContentType.find(_.matches("text" -> "xml")) orElse
-                    weightedContentType.find(_.matches("application" -> "xml"))).isDefined
+  lazy val xml_? = (weightedContentType.find(_.matches("text" -> "xml")) orElse 
+                    weightedContentType.find(_.matches("application" -> "xml"))).isDefined 
 
-  lazy val json_? =
+  lazy val json_? = 
     (weightedContentType.find(_.matches("text" -> "json")) orElse
      weightedContentType.find(_.matches("application" -> "json"))).isDefined
-
-  /**
-   * Make the servlet session go away
-   */
-  def destroyServletSession() {
-    for {
-      httpReq <- Box !! request
-    } httpReq.destroyServletSession()
-  }
 
   def snapshot = {
     val paramCalc = paramCalculator()
     new Req(path,
-            contextPath,
-            requestType,
-            contentType,
-            request.snapshot,
-            nanoStart,
-            nanoEnd,
-            stateless_?,
-            () => paramCalc,
-            addlParams)
+     contextPath,
+     requestType,
+     contentType,
+     request.snapshot,
+     nanoStart,
+     nanoEnd,
+     () => paramCalc,
+     addlParams)
   }
   val section = path(0) match {case null => "default"; case s => s}
   val view = path(1) match {case null => "index"; case s@_ => s}
@@ -506,15 +451,6 @@ class Req(val path: ParsePath,
     case ca => ca.toList
   }
 
-  /**
-   * Get the session ID if there is one without creating on
-   */
-  def sessionId: Box[String] =
-    for {
-      httpRequest <- Box !! request
-      sid <- httpRequest.sessionId
-    } yield sid
-
   lazy val json: Box[JsonAST.JValue] = 
     if (!json_?) Empty
     else try {
@@ -552,15 +488,8 @@ class Req(val path: ParsePath,
       case e: Exception => Failure(e.getMessage, Full(e), Empty)
     }
 
-  /**
-   * The SiteMap Loc associated with this Req
-   */
   lazy val location: Box[Loc[_]] = LiftRules.siteMap.flatMap(_.findLoc(this))
 
-  /**
-   * Test the current SiteMap Loc for access control to insure
-   * that this Req is allowed to access the page
-   */
   def testLocation: Either[Boolean, Box[LiftResponse]] = {
     if (LiftRules.siteMap.isEmpty) Left(true)
     else location.map(_.testAccess) match {
@@ -576,26 +505,9 @@ class Req(val path: ParsePath,
   lazy val buildMenu: CompleteMenu = location.map(_.buildMenu) openOr
   CompleteMenu(Nil)
 
-  /**
-   * Computer the Not Found via a Template
-   */
-  private def notFoundViaTemplate(path: ParsePath): LiftResponse = {
-    S.statelessInit(this) {
-      (for {
-        session <- S.session
-        template =  TemplateFinder.findAnyTemplate(path.partPath)
-        resp <- session.processTemplate(template, this, path, 404)
-      } yield resp) match {
-        case Full(resp) => resp
-        case _ => Req.defaultCreateNotFound(this)
-      }
-    }
-  }
-
   def createNotFound: LiftResponse = 
     NamedPF((this, Empty), LiftRules.uriNotFound.toList) match {
       case DefaultNotFound => Req.defaultCreateNotFound(this)
-      case NotFoundAsTemplate(path) => notFoundViaTemplate(path)
       case NotFoundAsResponse(resp) => resp
       case NotFoundAsNode(node) => LiftRules.convertResponse((node, 404),
         S.getHeaders(LiftRules.defaultHeaders((node, this))),
@@ -606,7 +518,6 @@ class Req(val path: ParsePath,
   def createNotFound(f: Failure): LiftResponse = 
     NamedPF((this, Full(f)), LiftRules.uriNotFound.toList) match {
       case DefaultNotFound => Req.defaultCreateNotFound(this)
-      case NotFoundAsTemplate(path) => notFoundViaTemplate(path)
       case NotFoundAsResponse(resp) => resp
       case NotFoundAsNode(node) => LiftRules.convertResponse((node, 404),
         S.getHeaders(LiftRules.defaultHeaders((node, this))),
@@ -627,7 +538,6 @@ class Req(val path: ParsePath,
                               this.request,
                               this.nanoStart, 
                               this.nanoEnd, 
-                              true,
                               this.paramCalculator, 
                               this.addlParams)
          S.withReq(newReq) {
@@ -719,9 +629,8 @@ class Req(val path: ParsePath,
   lazy val isFirefox3: Boolean = (userAgent.map(_.indexOf("Firefox/3") >= 0)) openOr false
   lazy val isFirefox35: Boolean = (userAgent.map(_.indexOf("Firefox/3.5") >= 0)) openOr false
   lazy val isFirefox36: Boolean = (userAgent.map(_.indexOf("Firefox/3.6") >= 0)) openOr false
-  lazy val isFirefox40: Boolean = (userAgent.map(_.indexOf("Firefox/4") >= 0)) openOr false
 
-  def isFirefox35_+ : Boolean = isFirefox35 || isFirefox36  || isFirefox40
+  def isFirefox35_+ : Boolean = isFirefox35 || isFirefox36
 
   def isFirefox = isFirefox2 || isFirefox3 || isFirefox35_+
 
