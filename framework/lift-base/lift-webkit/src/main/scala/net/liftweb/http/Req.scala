@@ -305,19 +305,12 @@ case class ParamCalcInfo(paramNames: List[String],
             uploadedFiles: List[FileParamHolder],
             body: Box[Array[Byte]])
 
-
-/**
- * FIXME document
- */
 final case class ContentType(theType: String, 
                              subtype: String, 
                              order: Int,
                              q: Box[Double], 
                              extension: List[(String, String)]) extends Ordered[ContentType]
   {
-    /**
-     * FIXME document in detail
-     */
     def compare(that: ContentType): Int = ((that.q openOr 1d) compare (q openOr 1d)) match {
       case 0 => 
         def doDefault = {
@@ -326,19 +319,16 @@ final case class ContentType(theType: String,
 
         (theType, that.theType, subtype, that.subtype) match {
           case ("*", "*", _, _) => doDefault
-          case ("*", _, _, _) => 1
-          case (_, "*", _, _) => -1
+          case ("*", _, _, _) => -1
+          case (_, "*", _, _) => 1
           case (_, _, "*", "*") => doDefault
-          case (_, _, "*", _) => 1
-          case (_, _, _, "*") => -1
+          case (_, _, "*", _) => -1
+          case (_, _, _, "*") => 1
           case _ => doDefault
         }
       case x => x
     }
 
-    /**
-     * FIXME document
-     */
     def matches(contentType: (String, String)): Boolean =
       (theType == "*" || (theType == contentType._1)) &&
     (subtype == "*" || subtype == contentType._2)
@@ -349,21 +339,16 @@ final case class ContentType(theType: String,
     def wildCard_? = theType == "*" && subtype == "*"
   }
 
-/**
- * FIXME document
- */
 object ContentType {
-  /**
-   * FIXME document
-   */
-  def parse(str: String): List[ContentType] = 
+  def parse(in: Box[String]): List[ContentType] = if (null eq in) Nil else
     (for {
-      (part, index) <- str.charSplit(',').map(_.trim).zipWithIndex // split at comma
+      str <- in.toList // turn the box into a List
+      (part, index) <- str.roboSplit(",").zipWithIndex // split at comma
       content <- parseIt(part, index)
     } yield content).sort(_ < _)
 
   private object TwoType {
-    def unapply(in: String): Option[(String, String)] = in.charSplit('/') match {
+    def unapply(in: String): Option[(String, String)] = in.roboSplit("/") match {
       case a :: b :: Nil => Some(a -> b)
       case _ => None
     }
@@ -444,16 +429,15 @@ class Req(val path: ParsePath,
   /**
    * What is the content type in order of preference by the requestor
    */
-
-    lazy val weightedContentType: List[ContentType] = ContentType.parse(headers("accept").mkString(", "))
+  lazy val weightedContentType: List[ContentType] = ContentType.parse(contentType)
 
   /**
    * Returns true if the content-type is text/xml
    */
-  lazy val xml_? = (weightedContentType.find(_.matches("text" -> "xml")) orElse
-                    weightedContentType.find(_.matches("application" -> "xml"))).isDefined
+  lazy val xml_? = (weightedContentType.find(_.matches("text" -> "xml")) orElse 
+                    weightedContentType.find(_.matches("application" -> "xml"))).isDefined 
 
-  lazy val json_? =
+  lazy val json_? = 
     (weightedContentType.find(_.matches("text" -> "json")) orElse
      weightedContentType.find(_.matches("application" -> "json"))).isDefined
 
