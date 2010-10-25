@@ -21,8 +21,8 @@ package rest {
 
 import net.liftweb.json._
 import net.liftweb.common._
-import scala.xml.{Elem, Text}
-import util.{Helpers, Props}
+import net.liftweb.util.Props
+import scala.xml.{Elem, Node, Text}
 
 /**
  * Mix this trait into a class to provide a list of REST helper methods
@@ -462,6 +462,7 @@ trait RestHelper extends LiftRules.DispatchPF {
   @volatile private var _dispatch: List[Either[LiftRules.DispatchPF,
           (List[(String, String)], LiftRules.DispatchPF)]] = Nil
 
+  private trait ContentNegotiator
 
   private lazy val nonDevDispatch = _dispatch.reverse
 
