@@ -55,13 +55,6 @@ object CombinableBox {
                                      FailureList(f))
     case Right(x) => Full(x)
   }
- 
-  /**
-   * If the Failure is going to be condensed, generate a FailureList
-   */
-  final case class FailureList(failures: List[Failure])
-
-
 
   /**
    * The place where the results are accumulated

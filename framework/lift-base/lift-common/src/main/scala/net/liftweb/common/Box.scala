@@ -561,6 +561,13 @@ trait Boxable[T] {
   def asBox: Box[T]
 }
 
+  /**
+   * If the Failure is going to be condensed, generate a FailureList
+   */
+  final case class FailureList(failures: List[Failure])
+
+
+
 object ParamFailure {
   def apply[T](msg: String, exception: Box[Throwable], chain: Box[Failure], param: T) =
     new ParamFailure(msg, exception, chain, param)

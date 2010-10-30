@@ -2438,6 +2438,35 @@ for {
    */
   def error(vi: List[FieldError]) {p_notice ++= vi.map {i => (NoticeType.Error, i.msg, i.field.uniqueFieldId)}}
 
+  private def displayNestedFailure(failure: Failure, f: (NodeSeq) => Unit) {
+    failure match {
+      case ParamFailure(_, _, box, FailureList(list)) => {
+        box.foreach(f2 => displayNestedFailure(f2, f))
+        list.foreach(f3 => displayNestedFailure(f3, f))
+      }
+
+      case Failure(msg, _, box) => {
+        f(Text(msg))
+        box.foreach(f2 => displayNestedFailure(f2, f))
+      }
+    }
+  }
+  
+  /**
+   * Display notices based on all nested failures
+   */
+  def notice(failure: Failure) {displayNestedFailure(failure, notice _)}
+
+  /**
+   * Display warnings based on all nested failures
+   */
+  def warning(failure: Failure) {displayNestedFailure(failure, warning _)}
+
+  /**
+   * Display errors based on all nested failures
+   */
+  def error(failure: Failure) {displayNestedFailure(failure, error _)}
+
 
   private[http] def message(msg: String, notice: NoticeType.Value) {message(Text(msg), notice)}
 
