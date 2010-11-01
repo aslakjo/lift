@@ -462,7 +462,6 @@ trait RestHelper extends LiftRules.DispatchPF {
   @volatile private var _dispatch: List[Either[LiftRules.DispatchPF,
           (List[(String, String)], LiftRules.DispatchPF)]] = Nil
 
-  private trait ContentNegotiator
 
   private lazy val nonDevDispatch = _dispatch.reverse
 
@@ -475,8 +474,15 @@ trait RestHelper extends LiftRules.DispatchPF {
    */
   def isDefinedAt(in: Req) = {
     dispatch.find{
-      case Left(x) => x.isDefinedAt(in)
-      case Right(x) => x._2.isDefinedAt(in)
+      case Left(x) => {
+        x.isDefinedAt(in)
+      }
+      case Right(x) => {
+        ContentNegotiator.selectedContentType(in) match {
+          case Some(c) => x._1.contains((c.theType, c.subtype)) && x._2.isDefinedAt(in)
+          case None => false
+        }
+      }
     }.isDefined
   }
 
