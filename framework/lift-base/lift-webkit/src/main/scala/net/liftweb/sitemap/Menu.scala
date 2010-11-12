@@ -330,13 +330,20 @@ case class Menu(loc: Loc[_], private val convertableKids: ConvertableToMenu*) ex
   kids.flatMap(_.locForGroup(group))
 
 
-  override def buildUpperLines(pathAt: HasKids, actual: Menu, populate: List[MenuItem]): List[MenuItem]
-  = {
-    val kids: List[MenuItem] =
-    _parent.toList.flatMap(_.kids.toList.flatMap(m => m.loc.buildItem(if (m == this)
-                                                                      populate else
-                                                                      Nil, m == actual, m == pathAt)))
+  override def buildUpperLines(pathAt: HasKids, actual: Menu, populate: List[MenuItem]): List[MenuItem] = {
+    def buildItem(m : Menu) : List[MenuItem] = {
+      if (m == this) {
+        m.loc.buildItem(populate, m == actual, m == pathAt)
+      } else if (m.loc.placeHolder_?) {
+        m.makeMenuItem(Nil)
+      } else {
+        m.loc.buildItem(Nil, m == actual, m == pathAt)
+      }
+    }.toList
 
+    val kids: List[MenuItem] =
+    _parent.toList.flatMap(_.kids.toList.flatMap(buildItem))
+    
     _parent.toList.flatMap(p => p.buildUpperLines(p, actual, kids))
   }
 
