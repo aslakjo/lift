@@ -29,7 +29,9 @@ import _root_.net.liftweb.util._
 import Helpers._
 
 class HTTPRequestServlet(val req: HttpServletRequest) extends HTTPRequest {
-  private lazy val ctx = new HTTPServletContext(req.getSession.getServletContext)
+  private lazy val ctx = {
+    new HTTPServletContext(req.getSession.getServletContext)
+  }
 
   lazy val cookies: List[HTTPCookie] = {
     req.getSession(false) // do this to make sure we capture the JSESSIONID cookie
@@ -55,7 +57,9 @@ class HTTPRequestServlet(val req: HttpServletRequest) extends HTTPRequest {
 
   def contentType = Box !! req.getContentType
 
-  lazy val session = new HTTPServletSession(req getSession)
+  lazy val session = {
+    new HTTPServletSession(req getSession)
+  }
 
   def uri = req.getRequestURI
 
