@@ -133,6 +133,12 @@ object MapperRules extends Factory {
    *  MapperRules.columnName =  (_,name) => StringHelpers.snakify(name)
    */
   var tableName: (ConnectionIdentifier,String) => String = (_,name) => name.toLowerCase
+
+  /**
+   * Define the set of functions that will be used to parse Strings
+   * into their proper field types.
+   */
+  var parsers : MapperParsers = DefaultMapperParsers
 }
 
 trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {

@@ -248,9 +248,9 @@ abstract class MappedInt[T<:Mapper[T]](val fieldOwner: T) extends MappedField[In
       case Some(n: Number) => this.set(n.intValue)
       case Full(n: Number) => this.set(n.intValue)
       case None | Empty | Failure(_, _, _) => this.set(0)
-      case (s: String) :: _ => this.set(toInt(s))
+      case (s: String) :: _ => MapperRules.parsers.parseInt(s, this.set, this)
       case null => this.set(0)
-      case s: String => this.set(toInt(s))
+      case s: String => MapperRules.parsers.parseInt(s, this.set, this)
       case o => this.set(toInt(o))
     }
   }

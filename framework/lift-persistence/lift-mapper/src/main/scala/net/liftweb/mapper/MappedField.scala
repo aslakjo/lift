@@ -507,6 +507,21 @@ trait MappedField[FieldType <: Any,OwnerType <: Mapper[OwnerType]] extends Typed
    */
   def setFromAny(value: Any): FieldType
 
+  /**
+   * This defines a per-field method that can be used to parse the field
+   * value from a String. You can set global parsing for a given type
+   * using the MapperParsers trait and the MapperRules.parsers variable.
+   */
+  val parseValue : Box[String => FieldType] = Empty
+
+  /**
+   * This defines a per-field parse error handler. If you want
+   * to override a specific field's parse error handling, provide
+   * a function here. You can set a global parse error handler
+   * using the MapperParsers trait and the MapperRules.parsers variable.
+   */
+  val parseErrorHandler : Box[String => FieldType] = Empty
+
   def toFormAppendedAttributes: MetaData =
   if (Props.mode == Props.RunModes.Test)
   new PrefixedAttribute("lift", "field_name", Text(calcFieldName), Null)
