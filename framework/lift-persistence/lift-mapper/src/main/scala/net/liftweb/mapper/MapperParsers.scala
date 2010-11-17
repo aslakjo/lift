@@ -28,12 +28,12 @@ import util.BasicTypesHelpers
  * TODO: More docs
  */
 trait MapperParsers {
-  def parseInt(value : String, setter : Int => Int, field: MappedField[Int, _]) : Int = {
-    setter(BasicTypesHelpers.toInt(value))
+  def parseInt(value : String, field: MappedField[Int, _]) : Int = {
+    field.set(BasicTypesHelpers.toInt(value))
   }
 
-  def parseLong(value : String, setter : Long => Long, field: MappedField[Long, _]) : Long = {
-    setter(BasicTypesHelpers.toLong(value))
+  def parseLong(value : String, field: MappedField[Long, _]) : Long = {
+    field.set(BasicTypesHelpers.toLong(value))
   }
 
   /**
@@ -53,18 +53,18 @@ trait MapperParsers {
 object DefaultMapperParsers extends MapperParsers
 
 object NewMapperParsers extends MapperParsers {
-  def tryParse[T](value : String, field : MappedField[T,_], setter : T => T, default : String => T) : T =
+  def tryParse[T](value : String, field : MappedField[T,_], default : String => T) : T =
     try {
-      setter((field.parseValue openOr default)(value))
+      field.set((field.parseValue openOr default)(value))
     } catch {
       case _ => dispatchErrorHandling(value, field)
     }
 
-  override def parseInt(value : String, setter : Int => Int, field: MappedField[Int, _]) : Int =
-    tryParse(value, field, setter, java.lang.Integer.parseInt)
+  override def parseInt(value : String, field: MappedField[Int, _]) : Int =
+    tryParse(value, field, java.lang.Integer.parseInt)
 
-  override def parseLong(value : String, setter : Long => Long, field: MappedField[Long, _]) : Long =
-    tryParse(value, field, setter, java.lang.Long.parseLong)
+  override def parseLong(value : String, field: MappedField[Long, _]) : Long =
+    tryParse(value, field, java.lang.Long.parseLong)
 
   override def parseErrorHandler[T](value : String, field: MappedField[T,_]) : T = {
     S.error("Invalid value \"%s\" for %s".format(value, field.displayName))
