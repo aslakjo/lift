@@ -18,19 +18,23 @@ package net.liftweb {
 package mongodb {
 package record {
 
-import net.liftweb.common.{Box, Full}
-import net.liftweb.record.{MetaRecord, Record}
-
-import com.mongodb.{BasicDBObject, DBObject, DBRef}
+import common.{Box, Full}
 
 import org.bson.types.ObjectId
+import com.mongodb.{BasicDBObject, DBObject, DBRef}
+import net.liftweb.record.Record
 
 trait MongoRecord[MyType <: MongoRecord[MyType]] extends Record[MyType] {
   self: MyType =>
 
   /*
-  * every mongo record must have an _id field. Override this with the value of your _id object.
-  */
+   * Mongo records that are to be saved in a separate collection must
+   * have an _id field. Set this to the value of that. This is defined
+   * for you if you mix in a MongoPk trait.
+   *
+   * For embedded objects, mix in the MongoEmbed trait or you must
+   * define this in your record.
+   */
   def id: Any
 
   /**
