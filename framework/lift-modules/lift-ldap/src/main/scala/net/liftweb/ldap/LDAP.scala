@@ -20,17 +20,17 @@ package ldap {
 import java.io.{InputStream, FileInputStream}
 import java.util.{Hashtable, Properties}
 
-import javax.naming.Context
+import javax.naming.{AuthenticationException,CommunicationException,Context,NamingException}
 import javax.naming.directory.{Attributes, BasicAttributes, SearchControls}
-import javax.naming.ldap.{LdapName, InitialLdapContext}
+import javax.naming.ldap.{InitialLdapContext,LdapName}
 
+import scala.collection.mutable.ListBuffer
 import scala.collection.jcl.MapWrapper
 
-import _root_.net.liftweb.util.Props
-import _root_.net.liftweb.common.Loggable
+import _root_.net.liftweb.util.{Props,SimpleInjector,ThreadGlobal}
+import _root_.net.liftweb.common.{Box,Empty,Full,Loggable}
 
 /**
- * Extends SimpleLDAPVendor trait,
  * Allow us to search and bind an username from a ldap server
  * To set the ldap server parameters override the parameters var directly:
  *    SimpleLDAPVendor.parameters = () => Map("ldap.username" -> ...
@@ -47,12 +47,12 @@ import _root_.net.liftweb.common.Loggable
  *
  * It also can be initialized from boot with default Properties with setupFromBoot
  */
-object SimpleLDAPVendor extends SimpleLDAPVendor {
-    def parametersFromFile(filename: String) : StringMap = {
+object SimpleLDAPVendor extends LDAPVendor {
+    def parametersFromFile(filename: String) : Map[String, String] = {
         return parametersFromStream(new FileInputStream(filename))
     }
 
-    def parametersFromStream(stream: InputStream) : StringMap = {
+    def parametersFromStream(stream: InputStream) : Map[String, String] = {
         val p = new Properties()
         p.load(stream)
 
@@ -60,16 +60,17 @@ object SimpleLDAPVendor extends SimpleLDAPVendor {
     }
 
     def setupFromBoot = {
-        def isConfigured = parameters() != null
-
-        if(!isConfigured) {
-            parameters = () => {
-                Map("ldap.url"      -> Props.get("ldap.url").openOr(DEFAULT_URL),
-                    "ldap.base"     -> Props.get("ldap.base").openOr(DEFAULT_BASE_DN),
-                    "ldap.userName" -> Props.get("ldap.userName").openOr(DEFAULT_USER),
-                    "ldap.password" -> Props.get("ldap.password").openOr(DEFAULT_PASSWORD))
-            }
-        }
+      if(parameters.vend.isEmpty) {
+        parameters.default.set(() => {
+          Map("ldap.url"      -> Props.get("ldap.url").openOr(DEFAULT_URL),
+              "ldap.base"     -> Props.get("ldap.base").openOr(DEFAULT_BASE_DN),
+              "ldap.userName" -> Props.get("ldap.userName").openOr(DEFAULT_USER),
+              "ldap.password" -> Props.get("ldap.password").openOr(DEFAULT_PASSWORD))
+        })
+      }
+      
+      // Set the test DN if provided
+      Props.get("ldap.testLookup").foreach{ prop => testLookup.default.set(Full(prop))}
     }
 
     private def convertToStringMap(javaMap: Hashtable[String, String]) = {
@@ -79,90 +80,188 @@ object SimpleLDAPVendor extends SimpleLDAPVendor {
     }
 }
 
-trait SimpleLDAPVendor extends LDAPVendor
+class LDAPVendor extends Loggable with SimpleInjector {
+  // =========== Constants ===============
+  final val DEFAULT_URL = "localhost"
+  final val DEFAULT_BASE_DN = ""
+  final val DEFAULT_USER = ""
+  final val DEFAULT_PASSWORD = ""
+  final val DEFAULT_INITIAL_CONTEXT_FACTORY = "com.sun.jndi.ldap.LdapCtxFactory"
 
-class LDAPVendor extends Loggable {
+  // =========== Configuration ===========
 
-    type StringMap = Map[String, String]
+  /**
+   * This can be set to test the InitialContext on each LDAP
+   * operation. It should be set to a search DN.
+   */
+  val testLookup = new Inject[Box[String]](Empty){}
 
-    val DEFAULT_URL = "localhost"
-    val DEFAULT_BASE_DN = ""
-    val DEFAULT_USER = ""
-    val DEFAULT_PASSWORD = ""
-    val DEFAULT_INITIAL_CONTEXT_FACTORY = "com.sun.jndi.ldap.LdapCtxFactory"
+  /**
+   * This sets the interval between connection attempts
+   * on the InitialContext. The default is 5 seconds
+   */
+  val retryInterval = new Inject[Long](5000){}
 
-    var parameters: () => StringMap = () => null
+  /**
+   * This sets the maximum number of connection
+   * attempts before giving up. The default is 6
+   */
+  val retryMaxCount = new Inject[Int](6){}
 
-    lazy val initialContext = getInitialContext(parameters())
+  /**
+   * This sets the Directory SearchControls instance
+   * that is used to refine searches on the provider.
+   */
+  val searchControls = new Inject[SearchControls](defaultSearchControls){}
+  
+  /**
+   * The default SearchControls to use: search the
+   * base DN with a sub-tree scope, and return the
+   * "cn" attribute.
+   */
+  def defaultSearchControls() : SearchControls = {
+    val constraints = new SearchControls()
+    constraints.setSearchScope(SearchControls.SUBTREE_SCOPE)
+    constraints.setReturningAttributes(Array("cn"))
+    return constraints
+  }
 
-    def attributesFromDn(dn: String): Attributes =
-        initialContext.get.getAttributes(dn)
+  /**
+   * The Map of parameters to use for connecting to the
+   * provider.
+   */
+  val parameters = new Inject[Map[String, String]](Map()){}
 
-    def search(filter: String): List[String] = {
-        logger.debug("--> LDAPSearch.search: Searching for '%s'".format(filter))
+  // =========== Code ====================
 
-        var list = List[String]()
+  /**
+   * Obtains a (possibly cached) InitialContext
+   * instance based on the currently set parameters.
+   */
+  def initialContext = getInitialContext(parameters.vend)
 
-        val ctx = initialContext
+  def attributesFromDn(dn: String): Attributes =
+    initialContext.getAttributes(dn)
 
-        if (!ctx.isEmpty) {
-            val result = ctx.get.search(parameters().getOrElse("ldap.base", DEFAULT_BASE_DN),
-                                        filter,
-                                        getSearchControls())
+  /**
+   * Searches the base DN for entities matching the given filter.
+   */
+  def search(filter: String): List[String] = {
+    logger.debug("Searching for '%s'".format(filter))
 
-            while(result.hasMore()) {
-                var r = result.next()
-                list = list ::: List(r.getName)
-            }
+    val resultList = new ListBuffer[String]()
+
+    val searchResults = initialContext.search(parameters.vend.getOrElse("ldap.base", DEFAULT_BASE_DN),
+                                              filter,
+                                              searchControls.vend)
+
+    while(searchResults.hasMore()) {
+      resultList += searchResults.next().getName
+    }
+  
+    return resultList.reverse.toList
+  }
+
+  /**
+   * Attempts to authenticate the given DN against the configured
+   * LDAP provider.
+   */
+  def bindUser(dn: String, password: String) : Boolean = {
+    logger.debug("Attempting to bind user '%s'".format(dn))
+
+    try {
+      val username = dn + "," + parameters.vend.getOrElse("ldap.base", DEFAULT_BASE_DN)
+      var ctx = openInitialContext(parameters.vend ++ Map("ldap.userName" -> username,
+                                                       "ldap.password" -> password))
+      ctx.close
+
+      logger.debug("Successfully authenticated " + dn)
+      true
+    } catch {
+      case ae : AuthenticationException => {
+        logger.warn("Authentication failed for '%s' : %s".format(dn, ae.getMessage))
+        false
+      }
+      case e: Exception => {
+        logger.error("Error during LDAP authentication", e)
+        false
+      }
+    }
+  }
+
+  // This caches the context for the current thread
+  private[this] final val currentInitialContext = new ThreadGlobal[InitialLdapContext]()
+
+  /**
+   * This method attempts to fetch the cached InitialLdapContext for the
+   * current thread. If there isn't a current context, open a new one. If a
+   * test DN is configured, the connection (cached or new) will be validated
+   * by performing a lookup on the test DN.
+   */
+  private def getInitialContext(props: Map[String, String]) : InitialLdapContext = {
+    val maxAttempts = retryMaxCount.vend
+    var attempts = 0
+
+    var context : Box[InitialLdapContext] = Empty
+
+    while (context.isEmpty && attempts < maxAttempts) {
+      try {
+        context = (currentInitialContext.box, testLookup.vend) match {
+          // If we don't want to test an existing context, just return it
+          case (Full(ctxt), Empty) => Full(ctxt)
+          case (Full(ctxt), Full(test)) => {
+            logger.debug("Testing InitialContext prior to returning")
+            ctxt.lookup(test)
+            Full(ctxt)
+          }
+          case (Empty,_) => {
+            // We'll just allocate a new InitialContext to the thread
+            currentInitialContext(openInitialContext(props))
+
+            // Setting context to Empty here forces one more iteration in case a test
+            // DN has been configured
+            Empty
+          }
         }
+      } catch {
+        case commE : CommunicationException => {
+          logger.error("Communcations failure on attempt %d while " +
+                       "verifying InitialContext: %s".format(attempts + 1, commE.getMessage))
 
-        return list
-    }
+          // The current context failed, so clear it
+          currentInitialContext(null)
 
-    def bindUser(dn: String, password: String) : Boolean = {
-        logger.debug("--> LDAPSearch.bindUser: Try to bind user '%s'".format(dn))
-
-        var result = false
-
-        try {
-            val username = dn + "," + parameters().getOrElse("ldap.base", DEFAULT_BASE_DN)
-            var ctx = getInitialContext(parameters() ++ Map("ldap.userName" -> username,
-                                                            "ldap.password" -> password))
-            result = !ctx.isEmpty
-            ctx.get.close
+          // We sleep before retrying
+          Thread.sleep(retryInterval.vend)
+          attempts += 1
         }
-        catch {
-            case e: Exception => println(e)
-        }
-
-        logger.debug("--> LDAPSearch.bindUser: Bind successfull ? %s".format(result))
-
-        return result
+      }
     }
 
-    // TODO : Allow search controls && attributes without override method ?
-    def getSearchControls() : SearchControls = {
-        val searchAttributes = new Array[String](1)
-        searchAttributes(0) = "cn"
-
-        val constraints = new SearchControls()
-        constraints.setSearchScope(SearchControls.SUBTREE_SCOPE)
-        constraints.setReturningAttributes(searchAttributes)
-        return constraints
+    // We have a final check on the context before returning
+    context match {
+      case Full(ctxt) => ctxt
+      case Empty => throw new NamingException("Gave up connecting to '%s' after %d attempts".
+                                              format(props.get("ldap.url"), attempts))
     }
+  }
 
-    private def getInitialContext(props: StringMap) : Option[InitialLdapContext] = {
-        logger.debug("--> LDAPSearch.getInitialContext: Get initial context from '%s'".format(props.get("ldap.url")))
-
-        var env = new Hashtable[String, String]()
-        env.put(Context.PROVIDER_URL, props.getOrElse("ldap.url", DEFAULT_URL))
-        env.put(Context.SECURITY_AUTHENTICATION, "simple")
-        env.put(Context.SECURITY_PRINCIPAL, props.getOrElse("ldap.userName", DEFAULT_USER))
-        env.put(Context.SECURITY_CREDENTIALS, props.getOrElse("ldap.password", DEFAULT_PASSWORD))
-        env.put(Context.INITIAL_CONTEXT_FACTORY, parameters().getOrElse("ldap.initial_context_factory",
-                                                                        DEFAULT_INITIAL_CONTEXT_FACTORY))
-        return Some(new InitialLdapContext(env, null))
-    }
+  /**
+   * This method does the actual work of setting up the environment and constructing
+   * the InitialLdapContext.
+   */
+  private def openInitialContext (props : Map[String, String]) : InitialLdapContext = {
+    logger.debug("Obtaining an initial context from '%s'".format(props.get("ldap.url")))
+            
+    var env = new Hashtable[String, String]()
+    env.put(Context.PROVIDER_URL, props.getOrElse("ldap.url", DEFAULT_URL))
+    env.put(Context.SECURITY_AUTHENTICATION, "simple")
+    env.put(Context.SECURITY_PRINCIPAL, props.getOrElse("ldap.userName", DEFAULT_USER))
+    env.put(Context.SECURITY_CREDENTIALS, props.getOrElse("ldap.password", DEFAULT_PASSWORD))
+    env.put(Context.INITIAL_CONTEXT_FACTORY, parameters().getOrElse("ldap.initial_context_factory",
+                                                                    DEFAULT_INITIAL_CONTEXT_FACTORY))
+    new InitialLdapContext(env, null)
+  }
 }
 
 }
