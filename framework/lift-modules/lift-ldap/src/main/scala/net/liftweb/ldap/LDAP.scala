@@ -27,57 +27,56 @@ import javax.naming.ldap.{InitialLdapContext,LdapName}
 import scala.collection.mutable.ListBuffer
 import scala.collection.jcl.MapWrapper
 
-import _root_.net.liftweb.util.{Props,SimpleInjector,ThreadGlobal}
+import _root_.net.liftweb.util.{ControlHelpers,Props,SimpleInjector,ThreadGlobal}
 import _root_.net.liftweb.common.{Box,Empty,Full,Loggable}
 
 /**
- * Allow us to search and bind an username from a ldap server
- * To set the ldap server parameters override the parameters var directly:
- *    SimpleLDAPVendor.parameters = () => Map("ldap.username" -> ...
- * or set the parameters from a properties file or a inputStream
- *    SimpleLDAPVendor.parameters = () => SimpleLDAPVendor.parametersFromFile("/opt/config/ldap.properties")
- *    SimpleLDAPVendor.parameters = () => SimpleLDAPVendor.parametersFromStream(
-                this.getClass().getClassLoader().getResourceAsStream("ldap.properties"))
+ * Allow us to search and bind an username from a ldap server.
  *
- * The mandatory parameters are :
- *  ldap.url -> LDAP Server url : ldap://localhost
- *  ldap.base -> Base DN from the LDAP Server : dc=company, dc=com
- *  ldap.userName -> LDAP user dn to perform search operations
- *  ldap.password -> LDAP user password
+ * To configure the LDAP Vendor parameters, use one of the configure
+ * methods to provide a Map of string parameters.
+ *
+ * The mandatory parameters are:
+ * <ul>
+ *  <li>ldap.url - The LDAP Server url : ldap://localhost</li>
+ *  <li>ldap.base - The base DN from the LDAP Server : dc=company, dc=com</li>
+ *  <li>ldap.userName - The LDAP user dn to perform search operations</li>
+ *  <li>ldap.password - The LDAP user password</li>
+ * </ul>
+ *
+ * Optionally, you can set the following parameters to control context testing
+ * and reconnect attempts:
+ *
+ * <ul>
+ *   <li>lift-ldap.testLookup - A DN to attempt to look up to validate the
+ *       current context. Defaults to no testing</li>
+ *   <li>lift-ldap.retryInterval - How many milliseconds to wait between connection
+ *       attempts due to communications failures. Defaults to 5000</li>
+ *   <li>lift-ldap.maxRetries - The maxiumum number of attempts to make to set up
+ *       the context before aborting. Defaults to 6</li>
+ * </ul>
  *
  * It also can be initialized from boot with default Properties with setupFromBoot
  */
 object SimpleLDAPVendor extends LDAPVendor {
-    def parametersFromFile(filename: String) : Map[String, String] = {
-        return parametersFromStream(new FileInputStream(filename))
-    }
+  @deprecated
+  def parametersFromFile(filename: String) : Map[String, String] = {
+    val input = new FileInputStream(filename)
+    val params = parametersFromStream(input)
+    input.close()
+    params
+  }
 
-    def parametersFromStream(stream: InputStream) : Map[String, String] = {
-        val p = new Properties()
-        p.load(stream)
+  @deprecated
+  def parametersFromStream(stream: InputStream) : Map[String, String] = {
+    val p = new Properties()
+    p.load(stream)
+    
+    propertiesToMap(p)
+  }
 
-        return convertToStringMap(p.asInstanceOf[Hashtable[String, String]])
-    }
-
-    def setupFromBoot = {
-      if(parameters.vend.isEmpty) {
-        parameters.default.set(() => {
-          Map("ldap.url"      -> Props.get("ldap.url").openOr(DEFAULT_URL),
-              "ldap.base"     -> Props.get("ldap.base").openOr(DEFAULT_BASE_DN),
-              "ldap.userName" -> Props.get("ldap.userName").openOr(DEFAULT_USER),
-              "ldap.password" -> Props.get("ldap.password").openOr(DEFAULT_PASSWORD))
-        })
-      }
-      
-      // Set the test DN if provided
-      Props.get("ldap.testLookup").foreach{ prop => testLookup.default.set(Full(prop))}
-    }
-
-    private def convertToStringMap(javaMap: Hashtable[String, String]) = {
-        Map.empty ++ new MapWrapper[String, String]() {
-            def underlying = javaMap
-        }
-    }
+  @deprecated
+  def setupFromBoot = configure()
 }
 
 class LDAPVendor extends Loggable with SimpleInjector {
@@ -89,6 +88,54 @@ class LDAPVendor extends Loggable with SimpleInjector {
   final val DEFAULT_INITIAL_CONTEXT_FACTORY = "com.sun.jndi.ldap.LdapCtxFactory"
 
   // =========== Configuration ===========
+  @deprecated
+  def parameters : () => Map[String,String] =
+    if (configuration.vend.isEmpty) {
+      () => null
+    } else {
+      () => configuration.vend
+    }
+
+  @deprecated
+  def parameters_= (newParams : () => Map[String,String]) {
+    configuration.default.set(newParams())
+    processConfig()
+  }
+
+  /**
+   * Configure straight from the Props object. This allows
+   * you to use Lift's run modes for different LDAP configuration.
+   */
+  def configure() {
+    configure(Props.props)
+  }
+
+  /**
+   * Configure from the given file. The file is expected
+   * to be in a format parseable by java.util.Properties
+   */
+  def configure(filename : String) {
+    configure(new FileInputStream(filename))
+  }
+
+  /**
+   * Configure from the given input stream. The stream is expected
+   * to be in a format parseable by java.util.Properties
+   */
+  def configure(stream : InputStream) {
+    val p = new Properties()
+    p.load(stream)
+    
+    configure(propertiesToMap(p))
+  }    
+
+  /**
+   * Configure from the given Map[String,String]
+   */
+  def configure(props : Map[String,String]) {
+    configuration.default.set(props)
+    processConfig()
+  }
 
   /**
    * This can be set to test the InitialContext on each LDAP
@@ -127,10 +174,54 @@ class LDAPVendor extends Loggable with SimpleInjector {
   }
 
   /**
-   * The Map of parameters to use for connecting to the
+   * The configuration to use for connecting to the
    * provider.
    */
-  val parameters = new Inject[Map[String, String]](Map()){}
+  val configuration = new Inject[Map[String,String]](Map()){}
+
+  /**
+   * This method checks the configuration and sets defaults for any
+   * properties that are required. It also processes any of the
+   * optional configuration propertes related to context testing
+   * and retries.
+   *
+   * This method is intended to be called after updating the default
+   * configuration, not during granular override of the config.
+   */
+  def processConfig() {
+    var currentConfig = configuration.vend
+
+    def setIfEmpty(name : String, newVal : String) = 
+      if (currentConfig.get(name).isEmpty) {
+        currentConfig += (name -> newVal)
+      }
+
+    // Verify the minimum config
+    setIfEmpty("ldap.url", DEFAULT_URL)
+    setIfEmpty("ldap.base", DEFAULT_BASE_DN)
+    setIfEmpty("ldap.userName", DEFAULT_USER)
+    setIfEmpty("ldap.password", DEFAULT_PASSWORD)
+
+    // Update with the new minimum config
+    configuration.default.set(currentConfig)
+
+    // Process the optional configuration properties
+    currentConfig.get("lift-ldap.testLookup").foreach{ prop => testLookup.default.set(Full(prop))}
+
+    ControlHelpers.tryo {
+      currentConfig.get("lift-ldap.retryInterval").foreach{ prop => retryInterval.default.set(prop.toLong)}
+    }
+
+    ControlHelpers.tryo {
+      currentConfig.get("lift-ldap.maxRetries").foreach{ prop => retryMaxCount.default.set(prop.toInt)}
+    }
+  }
+
+  protected def propertiesToMap(props: Properties) : Map[String,String] = {
+    Map.empty ++ new MapWrapper[String,String] {
+      val underlying = props.asInstanceOf[Hashtable[String,String]]
+    }
+  }
 
   // =========== Code ====================
 
@@ -138,7 +229,7 @@ class LDAPVendor extends Loggable with SimpleInjector {
    * Obtains a (possibly cached) InitialContext
    * instance based on the currently set parameters.
    */
-  def initialContext = getInitialContext(parameters.vend)
+  def initialContext = getInitialContext(configuration.vend)
 
   def attributesFromDn(dn: String): Attributes =
     initialContext.getAttributes(dn)
@@ -151,7 +242,7 @@ class LDAPVendor extends Loggable with SimpleInjector {
 
     val resultList = new ListBuffer[String]()
 
-    val searchResults = initialContext.search(parameters.vend.getOrElse("ldap.base", DEFAULT_BASE_DN),
+    val searchResults = initialContext.search(configuration.vend.getOrElse("ldap.base", DEFAULT_BASE_DN),
                                               filter,
                                               searchControls.vend)
 
@@ -170,20 +261,16 @@ class LDAPVendor extends Loggable with SimpleInjector {
     logger.debug("Attempting to bind user '%s'".format(dn))
 
     try {
-      val username = dn + "," + parameters.vend.getOrElse("ldap.base", DEFAULT_BASE_DN)
-      var ctx = openInitialContext(parameters.vend ++ Map("ldap.userName" -> username,
+      val username = dn + "," + configuration.vend.getOrElse("ldap.base", DEFAULT_BASE_DN)
+      var ctx = openInitialContext(configuration.vend ++ Map("ldap.userName" -> username,
                                                        "ldap.password" -> password))
       ctx.close
 
-      logger.debug("Successfully authenticated " + dn)
+      logger.info("Successfully authenticated " + dn)
       true
     } catch {
       case ae : AuthenticationException => {
         logger.warn("Authentication failed for '%s' : %s".format(dn, ae.getMessage))
-        false
-      }
-      case e: Exception => {
-        logger.error("Error during LDAP authentication", e)
         false
       }
     }
@@ -198,7 +285,7 @@ class LDAPVendor extends Loggable with SimpleInjector {
    * test DN is configured, the connection (cached or new) will be validated
    * by performing a lookup on the test DN.
    */
-  private def getInitialContext(props: Map[String, String]) : InitialLdapContext = {
+  protected def getInitialContext(props: Map[String, String]) : InitialLdapContext = {
     val maxAttempts = retryMaxCount.vend
     var attempts = 0
 
@@ -250,7 +337,7 @@ class LDAPVendor extends Loggable with SimpleInjector {
    * This method does the actual work of setting up the environment and constructing
    * the InitialLdapContext.
    */
-  private def openInitialContext (props : Map[String, String]) : InitialLdapContext = {
+  protected def openInitialContext (props : Map[String, String]) : InitialLdapContext = {
     logger.debug("Obtaining an initial context from '%s'".format(props.get("ldap.url")))
             
     var env = new Hashtable[String, String]()
@@ -258,8 +345,8 @@ class LDAPVendor extends Loggable with SimpleInjector {
     env.put(Context.SECURITY_AUTHENTICATION, "simple")
     env.put(Context.SECURITY_PRINCIPAL, props.getOrElse("ldap.userName", DEFAULT_USER))
     env.put(Context.SECURITY_CREDENTIALS, props.getOrElse("ldap.password", DEFAULT_PASSWORD))
-    env.put(Context.INITIAL_CONTEXT_FACTORY, parameters().getOrElse("ldap.initial_context_factory",
-                                                                    DEFAULT_INITIAL_CONTEXT_FACTORY))
+    env.put(Context.INITIAL_CONTEXT_FACTORY, props.getOrElse("ldap.initial_context_factory",
+                                                             DEFAULT_INITIAL_CONTEXT_FACTORY))
     new InitialLdapContext(env, null)
   }
 }
