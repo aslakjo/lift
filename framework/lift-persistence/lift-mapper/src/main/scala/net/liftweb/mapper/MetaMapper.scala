@@ -867,11 +867,13 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
                       case _ =>
 			if (colVal.dbIgnoreSQLType_?)
 			  st.setObject(colNum, colVal.jdbcFriendly(col._1))
-			else
+			else {
+                          println("Setting column %d to %s = %s".format(colNum, col._1, colVal.is))
 			  st.setObject(colNum, colVal.jdbcFriendly(col._1),
 				       conn.driverType.
 				       columnTypeMap(colVal.
 						     targetSQLType(col._1)))
+                        }
 
                     }
                     colNum = colNum + 1
