@@ -864,6 +864,11 @@ trait MetaMapper[A<:Mapper[A]] extends BaseMetaMapper with Mapper[A] {
                       case Types.VARCHAR =>
                         st.setString(colNum, colVal.jdbcFriendly(col._1).asInstanceOf[String])
 
+                      // Sybase SQL Anywhere chokes on using setObject for boolean data
+                      case Types.BOOLEAN =>
+                        // For some reason MappedBoolean uses Ints to represent data
+                        st.setBoolean(colNum, colVal.jdbcFriendly(col._1) == 1)
+
                       case _ =>
 			if (colVal.dbIgnoreSQLType_?)
 			  st.setObject(colNum, colVal.jdbcFriendly(col._1))
