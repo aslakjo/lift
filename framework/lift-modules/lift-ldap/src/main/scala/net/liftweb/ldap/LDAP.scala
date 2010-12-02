@@ -81,7 +81,7 @@ object SimpleLDAPVendor extends LDAPVendor {
 
 class LDAPVendor extends Loggable with SimpleInjector {
   // =========== Constants ===============
-  final val DEFAULT_URL = "localhost"
+  final val DEFAULT_URL = "ldap://localhost"
   final val DEFAULT_BASE_DN = ""
   final val DEFAULT_USER = ""
   final val DEFAULT_PASSWORD = ""
