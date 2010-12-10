@@ -170,7 +170,7 @@ abstract class ContainerVar[T](dflt: => T)(implicit containerSerializer: Contain
 
     case _ => {
       if (showWarningWhenAccessedOutOfSessionScope_?)
-      logger.warn("Getting a SessionVar "+name+" outside session scope") // added warning per issue 188
+      logger.warn("Getting a ContainerVar "+name+" outside session scope") // added warning per issue 188
 
       Empty
     }
@@ -193,7 +193,7 @@ abstract class ContainerVar[T](dflt: => T)(implicit containerSerializer: Contain
   override protected def setFunc(name: String, value: T): Unit = S.session match {
     // If we're in a stateless session, don't allow SessionVar setting
     case Full(s) if !s.allowContainerState_? && !s.stateful_? && !settingDefault_? =>
-      throw new StateInStatelessException("setting a SessionVar in a "+
+      throw new StateInStatelessException("setting a ContainerVar in a "+
                                           "stateless session: "+getClass.getName)
 
     case Full(session) => {
@@ -216,9 +216,9 @@ abstract class ContainerVar[T](dflt: => T)(implicit containerSerializer: Contain
       val lockObj: Object = s.synchronized {
         localGet(s, lockName) match {
           case Full(lock: Object) => lock
-          case _ => val lock = new Object
-          localSet(s, lockName, lock)
-          lock
+          case _ => val lock = new Object with java.io.Serializable
+            localSet(s, lockName, lock)
+            lock
         }
       }
 
