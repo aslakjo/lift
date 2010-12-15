@@ -138,17 +138,25 @@ object Schemifier extends Loggable {
 
 
   private def hasTable_? (table: BaseMetaMapper, connection: SuperConnection, actualTableNames: HashMap[String, String]): Boolean = {
+    println("Checking for table " + table._dbTableNameLC.toLowerCase)
     val md = connection.getMetaData
-    using(md.getTables(null, getDefaultSchemaName(connection), null, null)){ rs =>
+    val ret = using(md.getTables(null, getDefaultSchemaName(connection), null, null)){ rs =>
       def hasTable(rs: ResultSet): Boolean =
       if (!rs.next) false
-      else rs.getString(3) match {
+      else {
+        val rowTable = rs.getString(3)
+        println("  Found table " + rowTable)
+        rowTable match {
         case s if s.toLowerCase == table._dbTableNameLC.toLowerCase => actualTableNames(table._dbTableNameLC) = s; true
         case _ => hasTable(rs)
+        }
       }
 
       hasTable(rs)
     }
+
+    println("Actual tables = " + actualTableNames)
+    ret
   }
 
 
