@@ -190,6 +190,8 @@ trait BaseGetPoster {
     capture(url, httpClient, poster)
   }
 
+  
+
   implicit def xmlToRequestEntity(body: NodeSeq): RequestEntity =
     new RequestEntity {
       val bytes = body.toString.getBytes("UTF-8")
@@ -274,6 +276,8 @@ trait BaseGetPoster {
     })
     capture(url, httpClient, poster)
   }
+
+  
 
   /**
    * Perform an HTTP PUT
@@ -698,7 +702,7 @@ trait Response {
    * @param label the label for the XML node to search for in the response
    * @param msg the String to report as an error
    * @param errorFunc the error reporting thing.
-   */
+   */                                     
   def \\(label: String, msg: => String)(implicit errorFunc: ReportFailure): SelfType
 
   /**
@@ -770,6 +774,7 @@ trait Response {
    */
   def !\(label: String, msg: => String)(implicit errorFunc: ReportFailure): SelfType
 
+
   /**
    * the Response has a foreach method for chaining in a for comprehension
    */
@@ -793,7 +798,16 @@ class HttpResponse(baseUrl: String,
                    theHttpClient: HttpClient) extends
   BaseResponse(baseUrl, code, msg, headers, body, theHttpClient) with
   ToResponse with TestResponse {
+
+  
+  def submit(values : (String, String)*)={
+      //val names = (xml.get \\ "input").map(_ \\ "@name")
+      val action = (xml.get \\ "form" \\ "@action").text.split(";").head
+      val cookie = headers("Set-Cookie").head.split(";").head
+      post(action, theHttpClient,List(("cookie" -> cookie)), ("test" -> "test") )
   }
+
+}
 
 /**
  * The response to an HTTP request, as long as the server responds with *SOMETHING*
@@ -813,6 +827,8 @@ class TheResponse(baseUrl: String,
 trait TestResponse extends Response {
   override type SelfType = HttpResponse
   override type FuncType = HttpResponse
+
+  
 }
 
 /**
@@ -917,6 +933,8 @@ abstract class BaseResponse(override val baseUrl: String,
     f(st)
     st
   }
+
+  
 }
 
 class CompleteFailure(val serverName: String, val exception: Box[Throwable]) extends TestResponse {
