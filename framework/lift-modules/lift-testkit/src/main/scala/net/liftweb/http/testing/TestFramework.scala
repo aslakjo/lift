@@ -800,14 +800,43 @@ class HttpResponse(baseUrl: String,
   ToResponse with TestResponse {
 
   
-  def submit(values : (String, String)*)={
+  def submitValues(values : (String, String)*):ResponseType ={
       //val names = (xml.get \\ "input").map(_ \\ "@name")
       val action = (xml.get \\ "form" \\ "@action").text.split(";").head
       val cookie = headers("Set-Cookie").head.split(";").head
-      post(action, theHttpClient,List(("cookie" -> cookie)), ("test" -> "test") )
+      post(action, theHttpClient,List(("cookie" -> cookie)), values:_* )
+  }
+
+  def submit(values: (Label, String)*):ResponseType ={
+    val labels = xml.get \\ "form" \\ "label"
+
+    val ids:Seq[(String, String)] = values.map(
+      l  => labels.find(
+        node => node.text.equals(l._1.label)
+      ) match {
+        case Some(v) => ((v \\ "@for").text, l._2)
+        case None => (l._1.label, l._2)
+      }
+    )
+
+
+    (xml.get \\ "input").find(node =>
+      (node \\ "@id").text.equals(ids(0)._1)
+    ) match {
+      case Some(node) =>{
+        val name:String = (node \\ "@name").text
+        submitValues((name, ids(0)._2))
+      }
+      case None => submitValues((ids(0)._1, ids(0)._2))
+    }
   }
 
 }
+
+/**
+ * Represents a label that describes a form field
+ */
+case class Label(val label:String)
 
 /**
  * The response to an HTTP request, as long as the server responds with *SOMETHING*

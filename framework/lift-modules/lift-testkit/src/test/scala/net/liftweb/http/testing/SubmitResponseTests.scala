@@ -16,6 +16,11 @@ class SubmitResponseTests extends Specification{
     <body>
       <form action="/action" >
         <input name="field" value="test"/>
+
+        <label for="fake-set-uuid">Label</label>
+        <input id="fake-set-uuid" name="anotherField" value="value for label"/>
+
+        <label for="nothing">Nothing</label>
       </form>
     </body>
   </html>
@@ -37,7 +42,7 @@ class SubmitResponseTests extends Specification{
            }
          }
        }
-         response.submit(("test" -> "test"))
+         response.submit((Label("test") -> "test"))
      }
 
     "include the pust values in the request" in {
@@ -51,11 +56,25 @@ class SubmitResponseTests extends Specification{
              error("Value is not set correctly")
          }
        }
-         response.submit(("test" -> "test"))  
+         response.submit((Label("test") -> "test"))  
+    }
+
+    "set values for the corrensponding labels" in {
+       val response = new HttpResponse (
+         "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")),
+         Full(xml.toString.toArray.map(_.toByte)),
+         new HttpClient
+       ) with PostListener {
+         override def parameterVerifyer(httpMethod: PostMethod) ={
+           if(httpMethod.getParameter("anotherField").getValue.equals("given value"))
+             Unit
+           else
+             error("Value is not set correctly")
+         }
+       }
+         response.submit((Label("Label") -> "given value"))
     }
   }
-
-
 }
 
 trait PostListener {
@@ -77,4 +96,7 @@ trait PostListener {
   def headerVerifyer(header:Array[Header]):Unit = Unit
   def parameterVerifyer(httpMethod: PostMethod):Unit =Unit
 }
+
+
+
 
