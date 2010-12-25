@@ -11,7 +11,7 @@ import methods._
 
 
 class SubmitResponseTests extends Specification{
-
+  var shouldBeenCalled =false
   val xml = <html>
     <body>
       <form action="/action" >
@@ -27,7 +27,9 @@ class SubmitResponseTests extends Specification{
 
 
   "Submiting a reuqest" should {
+    doBefore{ shouldBeenCalled = false}
      "include the session cookie in header" in {
+
        val cookieValue = "cookie-value"
 
        val response = new HttpResponse (
@@ -36,13 +38,15 @@ class SubmitResponseTests extends Specification{
          new HttpClient
        ) with PostListener {
          override def headerVerifyer(headers : Array[Header]) = {
+           shouldBeenCalled = true
            headers.find(h =>  h.getName.equals("cookie") && h.getValue.equals(cookieValue)) match {
              case Some(_) => ;
              case None => error("Header not set.")
            }
          }
        }
-         response.submit((Label("test") -> "test"))
+        response.submit((Label("test") -> "test"))
+        shouldBeenCalled must be(true)
      }
 
     "include the pust values in the request" in {
@@ -52,11 +56,13 @@ class SubmitResponseTests extends Specification{
          new HttpClient
        ) with PostListener {
          override def parameterVerifyer(httpMethod: PostMethod) ={
+           shouldBeenCalled = true
            if(!httpMethod.getParameter("test").getValue.equals("test"))
              error("Value is not set correctly")
          }
        }
-         response.submit((Label("test") -> "test"))  
+         response.submit((Label("test") -> "test"))
+         shouldBeenCalled must be(true)
     }
 
     "set values for the corrensponding labels" in {
@@ -66,13 +72,15 @@ class SubmitResponseTests extends Specification{
          new HttpClient
        ) with PostListener {
          override def parameterVerifyer(httpMethod: PostMethod) ={
+           shouldBeenCalled = true
            if(httpMethod.getParameter("anotherField").getValue.equals("given value"))
              Unit
            else
              error("Value is not set correctly")
          }
        }
-         response.submit((Label("Label") -> "given value"))
+        response.submit((Label("Label") -> "given value"))
+        shouldBeenCalled must be(true)
     }
   }
 }
