@@ -15,7 +15,8 @@ class SubmitResponseTests extends Specification{
   val xml = <html>
     <body>
       <form action="/action" >
-        <input name="field" value="test"/>
+        <label for="field">field</label>
+        <input id="field" name="field" value="test"/>
 
         <label for="fake-set-uuid">Label</label>
         <input id="fake-set-uuid" name="anotherField" value="value for label"/>
@@ -45,11 +46,11 @@ class SubmitResponseTests extends Specification{
            }
          }
        }
-        response.submit((Label("test") -> "test"))
+        response.submit((Label("field") -> "test"))
         shouldBeenCalled must be(true)
      }
 
-    "include the pust values in the request" in {
+    "include the input values in the request" in {
       val response = new HttpResponse (
          "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")),
          Full(xml.toString.toArray.map(_.toByte)),
@@ -57,19 +58,18 @@ class SubmitResponseTests extends Specification{
        ) with PostListener {
          override def parameterVerifyer(httpMethod: PostMethod) ={
            shouldBeenCalled = true
-           if(!httpMethod.getParameter("test").getValue.equals("test"))
+           if(!httpMethod.getParameter("field").getValue.equals("new test value"))
              error("Value is not set correctly")
          }
        }
-         response.submit((Label("test") -> "test"))
-         shouldBeenCalled must be(true)
+      
+       response.submit((Label("field") -> "new test value"))
+       shouldBeenCalled must be(true)
     }
 
     "set values for the corrensponding labels" in {
        val response = new HttpResponse (
-         "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")),
-         Full(xml.toString.toArray.map(_.toByte)),
-         new HttpClient
+         "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")), Full(xml.toString.toArray.map(_.toByte)), new HttpClient
        ) with PostListener {
          override def parameterVerifyer(httpMethod: PostMethod) ={
            shouldBeenCalled = true
@@ -82,28 +82,28 @@ class SubmitResponseTests extends Specification{
         response.submit((Label("Label") -> "given value"))
         shouldBeenCalled must be(true)
     }
+
+    "should throw exception when input field is not found" in {
+      val response = new HttpResponse (
+         "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")), Full(xml.toString.toArray.map(_.toByte)), new HttpClient
+       ) with PostListener
+
+        try{
+          response.submit((Label("Non_existent_label") -> "Not set value"))
+          error("No exception thrown")
+        }catch{
+          case e:NoLabelFound => {
+            e.getMessage must_== "Label not found: Non_existent_label"
+          }
+          case e@_ => error("Wrong exception thrown: " + e)
+        }
+        pass
+    }
   }
+
+  def pass = true must be(true)
 }
 
-trait PostListener {
-  self : HttpResponse=>
-  type HttpResponse
-  override def responseCapture(fullUrl: String,
-                                       httpClient: HttpClient,
-                                       getter: HttpMethodBase): ResponseType = {
-    headerVerifyer(getter.getRequestHeaders)
-    parameterVerifyer(
-      if(getter.isInstanceOf[PostMethod])
-        getter.asInstanceOf[PostMethod] 
-      else
-        null
-    )
-    null
-  }
-
-  def headerVerifyer(header:Array[Header]):Unit = Unit
-  def parameterVerifyer(httpMethod: PostMethod):Unit =Unit
-}
 
 
 

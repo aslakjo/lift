@@ -812,10 +812,10 @@ class HttpResponse(baseUrl: String,
 
     val ids:Seq[(String, String)] = values.map(
       l  => labels.find(
-        node => node.text.equals(l._1.label)
-      ) match {
+          node => node.text.equals(l._1.label)
+        ) match {
         case Some(v) => ((v \\ "@for").text, l._2)
-        case None => (l._1.label, l._2)
+        case None => throw new NoLabelFound(l._1.label)
       }
     )
 
