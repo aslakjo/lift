@@ -68,19 +68,19 @@ class SubmitResponseTests extends Specification{
     }
 
     "set values for the corrensponding labels" in {
-       val response = new HttpResponse (
-         "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")), Full(xml.toString.toArray.map(_.toByte)), new HttpClient
-       ) with PostListener {
-         override def parameterVerifyer(httpMethod: PostMethod) ={
-           shouldBeenCalled = true
-           if(httpMethod.getParameter("anotherField").getValue.equals("given value"))
-             Unit
-           else
-             error("Value is not set correctly")
-         }
+      val response = new HttpResponse (
+       "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")), Full(xml.toString.toArray.map(_.toByte)), new HttpClient
+      ) with PostListener {
+       override def parameterVerifyer(httpMethod: PostMethod) ={
+         shouldBeenCalled = true
+         if(httpMethod.getParameter("anotherField").getValue.equals("given value"))
+           Unit
+         else
+           error("Value is not set correctly")
        }
-        response.submit((Label("Label") -> "given value"))
-        shouldBeenCalled must be(true)
+      }
+      response.submit((Label("Label") -> "given value"))
+      shouldBeenCalled must be(true)
     }
 
     "should throw exception when input field is not found" in {
@@ -98,6 +98,26 @@ class SubmitResponseTests extends Specification{
           case e@_ => error("Wrong exception thrown: " + e)
         }
         pass
+    }
+
+    "should set all input corresponding to labels to correct values" in {
+      val response = new HttpResponse (
+       "url", 200, "message", Map("Set-Cookie" -> List("cookie-value")), Full(xml.toString.toArray.map(_.toByte)), new HttpClient
+      ) with PostListener {
+       override def parameterVerifyer(httpMethod: PostMethod) ={
+         shouldBeenCalled = true
+         if(
+            httpMethod.getParameter("field").getValue.equals("field value") &&
+            httpMethod.getParameter("anotherField").getValue.equals("label value")
+          )
+           Unit
+         else
+           error("Value is not set correctly")
+       }
+      }
+
+      response.submit((Label("field") -> "field value"), (Label("Label")->"label value"))
+      shouldBeenCalled must be(true)
     }
   }
 

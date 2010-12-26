@@ -807,28 +807,32 @@ class HttpResponse(baseUrl: String,
       post(action, theHttpClient,List(("cookie" -> cookie)), values:_* )
   }
 
-  def submit(values: (Label, String)*):ResponseType ={
+  def submit(labelToValues: (Label, String)*):ResponseType ={
     val labels = xml.get \\ "form" \\ "label"
 
-    val ids:Seq[(String, String)] = values.map(
+    val ids:Seq[(String, String)] = labelToValues.map(
       l  => labels.find(
           node => node.text.equals(l._1.label)
         ) match {
-        case Some(v) => ((v \\ "@for").text, l._2)
+        case Some(label) => ((label \\ "@for").text, l._2)
         case None => throw new NoLabelFound(l._1.label)
       }
     )
 
 
-    (xml.get \\ "input").find(node =>
-      (node \\ "@id").text.equals(ids(0)._1)
-    ) match {
-      case Some(node) =>{
-        val name:String = (node \\ "@name").text
-        submitValues((name, ids(0)._2))
+    val valuesForSubmition = ids.map(id =>{
+      (xml.get \\ "input").find(node =>
+        (node \\ "@id").text.equals(id._1)
+      ) match {
+        case Some(node) =>{
+          val name:String = (node \\ "@name").text
+          (name, id._2)
+        }
+        case None => (id._1, id._2)
       }
-      case None => submitValues((ids(0)._1, ids(0)._2))
-    }
+    })
+
+    submitValues(valuesForSubmition:_*)
   }
 
 }
