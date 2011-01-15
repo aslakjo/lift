@@ -47,6 +47,53 @@ trait JQueryLeft {
   this: JsExp =>
 }
 
+/**
+ * A singleton that vends various different functions for WiringUI support
+ */
+object JqWiringSupport {
+  import js.JsCmds._
+  /**
+   * Fade out the old value and fade in the new value
+   * using jQuery fast fade.
+   */
+  def fade: (String, Boolean, JsCmd) => JsCmd = {
+    (id: String, first: Boolean, cmd: JsCmd) => {
+      if (first) cmd
+      else {
+        val sel = "jQuery('#'+"+id.encJs+")"
+        Run(sel+".fadeOut('fast', function() {"+
+            cmd.toJsCmd+" "+sel+".fadeIn('fast');})")
+      }
+    }
+  }
+
+  /**
+   * Hide the old value, set to new value and slide down.
+   */
+  def slideDown: (String, Boolean, JsCmd) => JsCmd = {
+    (id: String, first: Boolean, cmd: JsCmd) => {
+      if (first) cmd
+      else {
+        val sel = "jQuery('#'+"+id.encJs+")"
+        Run(sel+".hide(); "+cmd.toJsCmd+" "+sel+".slideDown('fast')")
+      }
+    }
+  }
+
+  /**
+   * Hide the old value, set to new value and slide down.
+   */
+  def slideUp: (String, Boolean, JsCmd) => JsCmd = {
+    (id: String, first: Boolean, cmd: JsCmd) => {
+      if (first) cmd
+      else {
+        val sel = "jQuery('#'+"+id.encJs+")"
+        Run(sel+".hide(); "+cmd.toJsCmd+" "+sel+".slideUp('fast')")
+      }
+    }
+  }
+}
+
 object JqJE {
   case object JqScrollToBottom extends JsExp with JsMember with JQueryRight with JQueryLeft {
     def toJsCmd = "each(function(i) {this.scrollTop=this.scrollHeight;})"
@@ -314,8 +361,20 @@ object JqJsCmds {
   }
 
   class ModalDialog(html: NodeSeq, css: Box[JsObj]) extends JsCmd {
-    val toJsCmd = "jQuery.blockUI({ message: " + AltXML.toXML(Group(S.session.map(s =>
-            s.fixHtml(s.processSurroundAndInclude("Modal Dialog", html))).openOr(html)), false, true, S.ieMode).encJs +
+    private def contentAsJsStr = {
+    val w = new java.io.StringWriter
+    
+    S.htmlProperties.
+    htmlWriter(Group(S.session.
+                     map(s =>
+                       s.fixHtml(s.processSurroundAndInclude("Modal Dialog",
+                                                             html))).
+                     openOr(html)),
+               w)
+    w.toString.encJs
+    }
+
+    val toJsCmd = "jQuery.blockUI({ message: " + contentAsJsStr +
             (css.map(",  css: " + _.toJsCmd + " ").openOr("")) + "});"
   }
 

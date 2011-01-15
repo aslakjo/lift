@@ -4,11 +4,11 @@
 
   <parent>
     <groupId>net.liftweb</groupId>
-    <artifactId>examples_2.8.0</artifactId>
-    <version>2.2-M1</version>
+    <artifactId>examples_2.8.1</artifactId>
+    <version>2.3-SNAPSHOT</version>
   </parent>
 
-  <artifactId>JPADemo-Master_2.8.0</artifactId>
+  <artifactId>JPADemo-Master_2.8.1</artifactId>
   <description>JPA tutorial master project</description>
   <name>JPA Demo Master</name>
   <inceptionYear>2007</inceptionYear>
@@ -23,11 +23,11 @@
   <repositories>
     <repository>
       <id>scala-tools</id>
-      <url>http://scala-tools.org/repo-snapshots</url>
+      <url>http://scala-tools.org/repo-releases</url>
     </repository>
     <repository>
-      <id>scala-tools</id>
-      <url>http://scala-tools.org/repo-releases</url>
+      <id>scala-tools.snapshot</id>
+      <url>http://scala-tools.org/repo-snapshots</url>
     </repository>
   </repositories>
 

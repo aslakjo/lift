@@ -194,9 +194,19 @@ object DB extends Loggable {
           def recurseMe(lst: List[ConnectionIdentifier]): T = lst match {
             case Nil =>
               try {
-                val ret = f
-                success = true
-                ret
+                try {
+                  val ret = f
+                  success = true
+                  ret
+                } catch {
+                  // this is the case when we want to commit the transaction
+                  // but continue to throw the exception
+                  case e: net.liftweb.http.ContinueResponseException => {
+                    success = true
+                    throw e
+                  }
+                }
+                 
               } finally {
                 clearThread(success)
               }
@@ -207,9 +217,18 @@ object DB extends Loggable {
         } else {
           CurrentConnectionSet.run(new ThreadBasedConnectionManager(in)) {
             try {
-              val ret = f
-              success = true
-              ret
+              try {
+                val ret = f
+                success = true
+                ret
+              } catch {
+                // this is the case when we want to commit the transaction
+                // but continue to throw the exception
+                case e: net.liftweb.http.ContinueResponseException => {
+                  success = true
+                  throw e
+                }
+              }
             } finally {
               clearThread(success)
             }
@@ -587,6 +606,13 @@ object DB extends Loggable {
         val ret = f(conn)
         rollback = false
         ret
+      } catch {
+        // this is the case when we want to commit the transaction
+        // but continue to throw the exception
+        case e: net.liftweb.http.ContinueResponseException => {
+          rollback = false
+          throw e
+        }
       } finally {
         releaseConnectionNamed(name, rollback)
       }
@@ -607,6 +633,8 @@ object DB extends Loggable {
 
   /**
   * The default reserved words.
+  *
+  * TODO : Maybe this should be refactored to allow for driver-specific reserved words
   */
   lazy val defaultReservedWords:  _root_.scala.collection.immutable.Set[String] = _root_.scala.collection.immutable.HashSet("abort",
        "accept",
@@ -895,6 +923,7 @@ object DB extends Loggable {
        "set",
        "share",
        "shared",
+       "show", // MySQL reserved word
        "size",
        "smallint",
        "snapshot",

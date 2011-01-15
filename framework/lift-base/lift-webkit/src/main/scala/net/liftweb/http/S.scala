@@ -167,6 +167,29 @@ object S extends HasParams with Loggable {
   private val _disableTestFuncNames = new ThreadGlobal[Boolean]
 
   private object postFuncs extends TransientRequestVar(new ListBuffer[() => Unit])
+
+  /**
+   * During an Ajax call made on a Comet component, make the Req's
+   * params available
+   */
+  private object paramsForComet extends TransientRequestVar[Map[String, List[String]]](Map())
+
+  /**
+   * We can now collect JavaScript to append to the outgoing request,
+   * no matter the format of the outgoing request
+   */
+  private object _jsToAppend extends TransientRequestVar(new ListBuffer[JsCmd])
+
+  /**
+   * We can now collect Elems to put in the head tag
+   */
+  private object _headTags extends TransientRequestVar(new ListBuffer[Elem])
+
+  /**
+   * We can now collect Elems to put at the end of the body
+   */
+  private object _tailTags extends TransientRequestVar(new ListBuffer[Elem])
+  
   private object p_queryLog extends TransientRequestVar(new ListBuffer[(String, Long)])
   private object p_notice extends TransientRequestVar(new ListBuffer[(NoticeType.Value, NodeSeq, Box[String])])
 
@@ -358,6 +381,16 @@ object S extends HasParams with Loggable {
   def ieMode: Boolean = session.map(_.ieMode.is) openOr false // LiftRules.calcIEMode()
 
   /**
+   * Get the current instance of HtmlProperties
+   */
+  def htmlProperties: HtmlProperties = {
+    session.map(_.requestHtmlProperties.is) openOr 
+    LiftRules.htmlProperties.vend(
+      S.request openOr Req.nil
+    )
+  }
+
+  /**
    * Return a List of the LiftRules.DispatchPF functions that are set for this
    * session. See addHighLevelSessionDispatcher for an example of how these are
    * used.
@@ -532,6 +565,72 @@ object S extends HasParams with Loggable {
     session map (_.sessionRewriter -= name)
 
   /**
+   * Put the given Elem in the head tag.  The Elems
+   * will be de-dupped so no problems adding the
+   * same style tag multiple times
+   */
+  def putInHead(elem: Elem): Unit = _headTags.is += elem
+
+  /**
+   * Get the accumulated Elems for head
+   *
+   * @see putInHead
+   */
+  def forHead(): List[Elem] = _headTags.is.toList
+
+  /**
+   * Put the given Elem at the end of the body tag.
+   */
+  def putAtEndOfBody(elem: Elem): Unit = _tailTags.is += elem
+
+  /**
+   * Get the accumulated Elems for the end of the body
+   *
+   * @see putAtEndOfBody
+   */
+  def atEndOfBody(): List[Elem] = _tailTags.is.toList
+
+  /**
+   * Sometimes it's helpful to accumute JavaScript as part of servicing
+   * a request.  For example, you may want to accumulate the JavaScript
+   * as part of an Ajax response or a Comet Rendering or
+   * as part of a regular HTML rendering.  Call S.appendJs(jsCmd).
+   * The accumulation of Js will be emitted as part of the response.
+   */
+  def appendJs(js: JsCmd): Unit = _jsToAppend.is += js
+
+  /**
+   * Sometimes it's helpful to accumute JavaScript as part of servicing
+   * a request.  For example, you may want to accumulate the JavaScript
+   * as part of an Ajax response or a Comet Rendering or
+   * as part of a regular HTML rendering.  Call S.appendJs(jsCmd).
+   * The accumulation of Js will be emitted as part of the response.
+   */
+  def appendJs(js: Seq[JsCmd]): Unit = _jsToAppend.is ++= js
+
+  /**
+   * Get the accumulated JavaScript
+   *
+   * @see appendJs
+   */
+  def jsToAppend(): List[JsCmd] = {
+    import js.JsCmds._
+    (for {
+      sess <- S.session
+    } yield sess.postPageJavaScript()) match {
+      case Full(Nil) => _jsToAppend.is.toList match {
+        case Nil => Nil
+        case xs => List(OnLoad(xs))
+      }
+      case Full(xs) => List(OnLoad(_jsToAppend.is.toList ::: xs))
+      case _ => _jsToAppend.is.toList match {
+        case Nil => Nil
+        case xs => List(OnLoad(xs))
+      }
+    }
+  }
+
+  /**
    * Clears the per-session rewrite table. See addSessionRewriter for an
    * example of usage.
    *
@@ -601,7 +700,9 @@ object S extends HasParams with Loggable {
   def resourceBundles: List[ResourceBundle] = {
     _resBundle.box match {
       case Full(Nil) => {
-        _resBundle.set(LiftRules.resourceNames.flatMap(name => tryo{
+        _resBundle.set(
+          LiftRules.resourceForCurrentLoc.vend() :::
+          LiftRules.resourceNames.flatMap(name => tryo{
               if (Props.devMode) {
                 tryo{
                   val clz = this.getClass.getClassLoader.loadClass("java.util.ResourceBundle")
@@ -1543,15 +1644,35 @@ for {
    * TemplateFinder.findAnyTemplate.
    *
    * @param path The path for the template that you want to process
+   * @param snips any snippet mapping specific to this template run
    * @return a Full Box containing the processed template, or a Failure if the template could not be found.
    *
    * @see TempalateFinder # findAnyTemplate
    */
-  def runTemplate(path: List[String]): Box[NodeSeq] =
-    for{
-      t <- TemplateFinder.findAnyTemplate(path) ?~ ("Couldn't find template " + path)
-      sess <- session ?~ "No current session"
-    } yield sess.processSurroundAndInclude(path.mkString("/", "/", ""), t)
+  def runTemplate(path: List[String], snips: (String,  NodeSeq => NodeSeq)*): Box[NodeSeq] =
+    mapSnippetsWith(snips :_*) {
+      for{
+        t <- TemplateFinder.findAnyTemplate(path) ?~ ("Couldn't find template " + path)
+        sess <- session ?~ "No current session"
+      } yield sess.processSurroundAndInclude(path.mkString("/", "/", ""), t)
+    }
+
+
+  /**
+   * Evaluate a template for snippets. This can be used to run a template
+   * from within some other Lift processing,
+   * such as a snippet or view.
+   *
+   * @param template the HTML template to run through the Snippet re-writing process
+   * @param snips any snippet mapping specific to this template run
+   * @return a Full Box containing the processed template, or a Failure if the template could not be found.
+   */
+  def eval(template: NodeSeq, snips: (String,  NodeSeq => NodeSeq)*): Box[NodeSeq] =
+    mapSnippetsWith(snips :_*) {
+      for{
+        sess <- session ?~ "No current session"
+      } yield sess.processSurroundAndInclude("HTML Constant", template)
+    }
 
   /**
    * Used to get an attribute by its name. There are several means to getting
@@ -2173,6 +2294,25 @@ for {
   }
 
   /**
+   * The companion object that generates AFuncHolders from other functions
+   */
+  object AFuncHolder {
+    implicit def strToAnyAF(f: String => Any): AFuncHolder =
+      SFuncHolder(f)
+
+    implicit def unitToAF(f: () => Any): AFuncHolder = NFuncHolder(f)
+
+    implicit def listStrToAF(f: List[String] => Any): AFuncHolder =
+      LFuncHolder(f)
+
+    implicit def boolToAF(f: Boolean => Any): AFuncHolder =
+      LFuncHolder(lst => lst match {
+        case Helpers.AsBoolean(true) :: _ => f(true)
+        case _ => f(false)
+      })
+  }
+
+  /**
    * Execute code synchronized to the current session object
    */
   def synchronizeForSession[T](f: => T): T = {
@@ -2302,7 +2442,10 @@ for {
         case _ =>
           val ret = LiftSession(httpRequest.session, req.contextPath)
           ret.fixSessionTime()
-          SessionMaster.addSession(ret, httpRequest.userAgent, SessionMaster.getIpFromReq(req))
+          SessionMaster.addSession(ret, 
+                                   req,
+                                   httpRequest.userAgent, 
+                                   SessionMaster.getIpFromReq(req))
           ret
       }
 
@@ -2347,12 +2490,23 @@ for {
   /**
    * Returns all the HTTP parameters having 'n' name
    */
-  def params(n: String): List[String] = request.flatMap(_.params.get(n)).openOr(Nil)
+  def params(n: String): List[String] = 
+    paramsForComet.get.get(n) getOrElse
+    request.flatMap(_.params.get(n)).openOr(Nil)
 
   /**
    * Returns the HTTP parameter having 'n' name
    */
-  def param(n: String): Box[String] = request.flatMap(r => Box(r.param(n)))
+  def param(n: String): Box[String] = 
+    paramsForComet.get.get(n).flatMap(_.headOption) orElse
+    request.flatMap(r => Box(r.param(n)))
+
+  /**
+   * Set the paramsForComet and run the function
+   */
+  private[http] def doCometParams[T](map: Map[String, List[String]])(f: => T): T = {
+    paramsForComet.doWith(map)(f)
+  }
 
   /**
    * Sets an ERROR notice as a plain text
@@ -2424,7 +2578,10 @@ for {
 
   private[http] def message(msg: NodeSeq, notice: NoticeType.Value) {p_notice += ((notice, msg, Empty))}
 
-  private[http] def messagesFromList(list: List[(NoticeType.Value, NodeSeq, Box[String])]) {list foreach (p_notice += _)}
+  /**
+   * Add a whole list of notices
+   */
+  def appendNotices(list: Seq[(NoticeType.Value, NodeSeq, Box[String])]) {p_notice.is ++= list}
 
   /**
    * Returns the current notices

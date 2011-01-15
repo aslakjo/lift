@@ -44,6 +44,11 @@ class Boot {
     DB.defineConnectionManager(DefaultConnectionIdentifier, DBVendor)
     LiftRules.addToPackages("net.liftweb.example")
 
+    /**
+     * We're doing this as HTML5
+     */
+    LiftRules.htmlProperties.default.set((r: Req) => new Html5Properties(r.userAgent))
+
     LiftRules.localeCalculator = r => definedLocale.openOr(LiftRules.defaultLocaleCalculator(r))
 
     if (!Props.inGAE) {
@@ -197,18 +202,23 @@ object MenuInfo {
       Menu("Forth Submenu") / "menu" / "four"),
     Menu(WikiStuff),
     Menu("Misc code") / "misc" submenus(
+      Menu("Long Time") / "longtime",
       Menu("Number Guessing") / "guess",
       Menu("Wizard") / "wiz",
       Menu("Wizard Challenge") / "wiz2",
       Menu("Simple Screen") / "simple_screen",
       Menu("Variable Screen") / "variable_screen",
       Menu("Arc Challenge #1") / "arc",
+      Menu("Simple Wiring") / "simple_wiring",
+      Menu("Wiring Invoice") / "invoice_wiring",
       Menu("File Upload") / "file_upload",
       Menu(Loc("login", Link(List("login"), true, "/login/index"),
                <xml:group>Requiring Login<strike>SiteMap</strike> </xml:group>)),
       Menu("Counting") / "count"),
     Menu(Loc("lift", ExtLink("http://liftweb.net"),
-             <xml:group> <i>Lift</i>project home</xml:group>)))
+             <xml:group> <i>Lift</i> project home</xml:group>)),
+    Menu(Loc("src", ExtLink("https://github.com/lift/lift/tree/master/examples/example"),
+             "Source code for this site")))
 }
 
 /**

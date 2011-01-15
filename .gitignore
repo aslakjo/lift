@@ -18,6 +18,10 @@ derby.log
 .manager
 .externalToolBuilders
 
+# ensime/emacs conf files
+.ensime
+.scala_dependencies
+
 # building
 target
 null

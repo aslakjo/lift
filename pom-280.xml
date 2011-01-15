@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  ~ Copyright 2009-2010 WorldWide Conferencing, LLC
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~     http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <!--
+  Shared aggregator model for Lift Framework projects. Used to facilitate
+  building Lift Framework projects conveniently from top level.
+  -->
+
+  <!--
+    ~ The Basics
+  -->
+  <groupId>net.liftweb</groupId>
+  <artifactId>lift_2.8.0</artifactId>
+  <version>2.2-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <!--
+    ~ More Project Information
+  -->
+  <name>Lift Web Framework Aggregator for Scala 2.8.0</name>
+  <description>
+    Lift Web Framework Parent Aggregator to facilitate building on Scala 2.8.0.
+  </description>
+
+  <!--
+    ~ Module Settings
+  -->
+  <!-- <modules/> -->
+
+  <!--
+    ~ Environment Settings
+  -->
+  <properties>
+    <lift-debug>false</lift-debug>
+    <lift-hudson>false</lift-hudson>
+    <lift-release>false</lift-release>
+  </properties>
+
+  <!--
+    ~ Dependency Settings
+  -->
+  <!--<dependencyManagement />-->
+  <!--<dependencies />-->
+
+  <!--
+    ~ Build Settings
+  -->
+  <build>
+   <plugins>
+     <plugin>
+       <groupId>org.apache.maven.plugins</groupId>
+       <artifactId>maven-patch-plugin</artifactId>
+       <version>1.1.1</version>
+       <configuration>
+         <patchFile>${basedir}/scala-280.patch</patchFile>
+         <targetDirectory>${basedir}</targetDirectory>
+       </configuration>
+       <executions>
+         <execution>
+           <id>default-patch-apply</id>
+           <goals>
+             <goal>apply</goal>
+           </goals>
+         </execution>
+         <execution>
+           <id>default-patch-unapply</id>
+           <phase>verify</phase>
+           <goals>
+             <goal>apply</goal>
+           </goals>
+           <configuration>
+             <reverse>true</reverse>
+           </configuration>
+         </execution>
+       </executions>
+     </plugin>
+     <plugin>
+       <groupId>org.apache.maven.plugins</groupId>
+       <artifactId>maven-invoker-plugin</artifactId>
+       <version>1.5</version>
+       <configuration>
+         <projectsDirectory>${basedir}</projectsDirectory>
+         <pomIncludes>
+           <pomInclude>invoke-scala-280</pomInclude>
+         </pomIncludes>
+         <streamLogs>true</streamLogs>
+         <properties>
+           <lift.debug>${lift-debug}</lift.debug>
+           <lift.hudson>${lift-hudson}</lift.hudson>
+           <lift.release>${lift-release}</lift.release>
+         </properties>
+       </configuration>
+       <executions>
+         <execution>
+           <goals>
+             <goal>install</goal>
+             <goal>run</goal>
+           </goals>
+         </execution>
+       </executions>
+     </plugin>
+   </plugins>
+  </build>
+
+  <!--
+    ~ Reporting Settings
+  -->
+  <!-- <reporting/> -->
+
+  <!--
+    ~ Profile Settings
+  -->
+   <profiles>
+     <profile>
+       <id>lift-hudson</id>
+       <activation>
+         <property>
+           <name>lift-hudson</name>
+           <value>true</value>
+         </property>
+       </activation>
+       <build>
+         <plugins>
+           <plugin>
+             <groupId>org.apache.maven.plugins</groupId>
+             <artifactId>maven-invoker-plugin</artifactId>
+             <configuration>
+               <invokerPropertiesFile>invoker-hudson.properties</invokerPropertiesFile>
+               <properties>
+                 <lift.hudson>true</lift.hudson>
+               </properties>
+             </configuration>
+           </plugin>
+         </plugins>
+       </build>
+     </profile>
+   </profiles>
+
+</project>

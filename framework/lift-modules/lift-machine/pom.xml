@@ -27,10 +27,10 @@
   -->
   <parent>
     <groupId>net.liftweb</groupId>
-    <artifactId>lift-modules_2.8.0</artifactId>
-    <version>2.2-M1</version>
+    <artifactId>lift-modules_2.8.1</artifactId>
+    <version>2.3-SNAPSHOT</version>
   </parent>
-  <artifactId>lift-machine_2.8.0</artifactId>
+  <artifactId>lift-machine_2.8.1</artifactId>
 
   <!--
     ~ More Project Information

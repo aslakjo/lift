@@ -307,6 +307,12 @@ case class Menu(loc: Loc[_], private val convertableKids: ConvertableToMenu*) ex
     loc.menu = this
   }
 
+  /**
+   * Rebuild the menu by mutating the child menu items.
+   * This mutation can be changing, adding or removing
+   */
+  def rebuild(f: List[Menu] => List[Menu]): Menu = Menu(loc, f(kids.toList) :_*)
+
   private[sitemap] def validate {
     _parent.foreach(p => if (p.isRoot_?) throw new SiteMapException("Menu items with root location (\"/\") cannot have children"))
     kids.foreach(_.validate)
@@ -339,17 +345,16 @@ case class Menu(loc: Loc[_], private val convertableKids: ConvertableToMenu*) ex
 
     _parent.toList.flatMap(p => p.buildUpperLines(p, actual, kids))
   }
-  // def buildChildLine: List[MenuItem] = kids.toList.flatMap(m => m.loc.buildItem(Nil, false, false))
 
   def makeMenuItem(path: List[Loc[_]]): Box[MenuItem] =
-  loc.buildItem(loc.buildKidMenuItems(kids), _lastInPath(path), _inPath(path))
+    loc.buildItem(kids.toList.flatMap(_.makeMenuItem(path)) ::: loc.supplimentalKidMenuItems, _lastInPath(path), _inPath(path))
 
   /**
    * Make a menu item only of the current loc is in the given group
    */
   def makeMenuItem(path: List[Loc[_]], group: String): Box[MenuItem] =
-  if (loc.inGroup_?(group)) loc.buildItem(loc.buildKidMenuItems(kids), _lastInPath(path), _inPath(path))
-  else Empty
+    if (loc.inGroup_?(group)) makeMenuItem(path)
+    else Empty
 
   private def _inPath(in: List[Loc[_]]): Boolean = in match {
     case Nil => false

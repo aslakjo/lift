@@ -24,6 +24,11 @@ sealed trait CssSelector {
   def subNodes: Box[SubNode]
 }
 
+final case class ElemSelector(elem: String, subNodes: Box[SubNode]) extends 
+  CssSelector
+
+final case class StarSelector(subNodes: Box[SubNode]) extends CssSelector
+
 final case class IdSelector(id: String, subNodes: Box[SubNode]) extends 
   CssSelector
 
@@ -38,8 +43,15 @@ subNodes: Box[SubNode]) extends CssSelector
 
 sealed trait SubNode
 
+object SubNode {
+  def unapply(bind: CssBind): Option[Box[SubNode]] = 
+    Some(bind.css.flatMap(_.subNodes))
+}
+
 final case class KidsSubNode() extends SubNode
 final case class AttrSubNode(attr: String) extends SubNode
+final case class AttrAppendSubNode(attr: String) extends SubNode
+final case class SelectThisNode() extends SubNode
 
 /**
  * Parse a subset of CSS into the appropriate selector objects
@@ -85,12 +97,23 @@ object CssSelectorParser extends Parsers with ImplicitConversions {
   private lazy val topParser: Parser[CssSelector] = {
     idMatch |
     classMatch |
-    attrMatch
+    attrMatch |
+    elemMatch |
+    starMatch
   }
     
   private lazy val idMatch: Parser[CssSelector] = '#' ~> id ~ opt(subNode) ^^ {
     case id ~ sn => IdSelector(id, sn)
   }
+
+  private lazy val elemMatch: Parser[CssSelector] =  id ~ opt(subNode) ^^ {
+    case elem ~ sn => ElemSelector(elem, sn)
+  }
+
+  private lazy val starMatch: Parser[CssSelector] =  '*' ~> opt(subNode) ^^ {
+    case sn => StarSelector(sn)
+  }
+
 
   private lazy val id: Parser[String] = letter ~ 
   rep(letter | number | '-' | '_' | ':' | '.') ^^ {
@@ -118,10 +141,14 @@ object CssSelectorParser extends Parsers with ImplicitConversions {
     }
 
   private lazy val subNode: Parser[SubNode] = rep1(' ') ~> 
-  ((opt('*') ~ '[' ~> attrName <~ ']' ^^ {
-    name => AttrSubNode(name)
+  ((opt('*') ~ '[' ~> attrName <~ '+' ~ ']' ^^ {
+    name => AttrAppendSubNode(name)
   }) | 
-   '*' ^^ (a => KidsSubNode()))
+   (opt('*') ~ '[' ~> attrName <~ ']' ^^ {
+     name => AttrSubNode(name)
+   }) | 
+   '*' ^^ (a => KidsSubNode()) |
+   '^' ~ '^' ^^ (a => SelectThisNode()))
 
   private lazy val attrName: Parser[String] = (letter | '_' | ':') ~
   rep(letter | number | '-' | '_' | ':' | '.') ^^ {

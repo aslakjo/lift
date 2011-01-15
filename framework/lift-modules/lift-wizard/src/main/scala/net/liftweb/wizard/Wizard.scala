@@ -58,14 +58,32 @@ object WizardRules extends Factory with FormVendor {
 
 trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
   def dispatch = {
-    case _ => ignore => this.toForm
+    case _ => template => {
+      _defaultXml.set(template)
+      this.toForm
+    }
   }
+
+  /**
+   * Holds the template passed via the snippet for the duration
+   * of the request
+   */
+  protected object _defaultXml extends TransientRequestVar[NodeSeq](NodeSeq.Empty)
+
+  /**
+   * the NodeSeq passed as a parameter when the snippet was invoked
+   */
+  protected def defaultXml: NodeSeq = _defaultXml.get
 
   implicit def elemInABox(in: Elem): Box[Elem] = Full(in)
 
   @volatile private[this] var _screenList: List[Screen] = Nil
   private object ScreenVars extends RequestVar[Map[String, (NonCleanAnyVar[_], Any)]](Map())
-  protected object CurrentScreen extends RequestVar[Box[Screen]](calcFirstScreen)
+  protected object CurrentScreen extends WizardVar[Box[Screen]]({
+    val screen = calcFirstScreen
+    screen.foreach(_.transitionIntoFrom(Empty))
+    screen
+  })
   private object PrevSnapshot extends RequestVar[Box[WizardSnapshot]](Empty)
   protected object Referer extends WizardVar[String](S.referer openOr "/")
   protected object OnFirstScreen extends RequestVar[Boolean](true)
@@ -80,15 +98,30 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
     screen.noticeTypeToAttr(screen)
   }
 
+  /**
+   * Override this method to do setup the first time the
+   * screen is entered
+   */
+  protected def localSetup() {
+
+  }
 
   def toForm = {
+    ScreenVars.is // initialize
     Referer.is // touch to capture the referer
     CurrentSession.is
 
     if (FirstTime) {
       FirstTime.set(false)
+
+      localSetup()
+
       val localSnapshot = createSnapshot
-      S.seeOther(S.uri, () => localSnapshot.restore)
+      val notices = S.getAllNotices
+      S.seeOther(S.uri, () => {
+        S.appendNotices(notices)
+        localSnapshot.restore
+      })
     }
 
     val nextId = Helpers.nextFuncName
@@ -150,6 +183,20 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
 
   protected def wizardBottom: Box[Elem] = None
 
+  private def doTransition(from: Box[Screen], to: Box[Screen]) {
+    (from, to) match  {
+      case (Full(old), Full(cur)) if old eq cur => {/* do nothing */}
+      case (Full(old), Full(cur)) => {
+        old.transitionOutOfTo(Full(cur))
+        cur.transitionIntoFrom(Full(old))
+      }
+
+      case (Full(old), _) => old.transitionOutOfTo(Empty)
+      case (_, Full(cur)) => cur.transitionIntoFrom(Empty)
+      case _ =>
+    }
+  }
+
   class WizardSnapshot(private[wizard] val screenVars: Map[String, (NonCleanAnyVar[_], Any)],
                        val currentScreen: Box[Screen],
                        private[wizard] val snapshot: Box[WizardSnapshot],
@@ -157,6 +204,12 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
     def restore() {
       registerThisSnippet();      
       ScreenVars.set(screenVars)
+      if (CurrentScreen.set_?) {
+        doTransition(CurrentScreen.get, currentScreen)
+      } else {
+        currentScreen.foreach(_.transitionIntoFrom(Empty))
+      }
+
       CurrentScreen.set(currentScreen)
       PrevSnapshot.set(snapshot)
       OnFirstScreen.set(firstScreen)
@@ -204,7 +257,12 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
 
   def currentScreen: Box[Screen] = CurrentScreen.is
 
-  def createSnapshot = new WizardSnapshot(ScreenVars.is, CurrentScreen.is, PrevSnapshot.is, OnFirstScreen.is)
+  def createSnapshot = {
+    val cs = CurrentScreen.is
+    val prev = PrevSnapshot.is
+    val onFirst = OnFirstScreen.is
+    new WizardSnapshot(ScreenVars.is, cs, prev, onFirst)
+  }
 
   /**
    * This method will be called within a transactional block when the last screen is completed
@@ -216,11 +274,12 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
       screen <- CurrentScreen.is
     } {
       screen.validate match {
-        case Nil =>
+        case Nil => {
           val snapshot = createSnapshot
           PrevSnapshot.set(Full(snapshot))
           val nextScreen = screen.nextScreen
-          CurrentScreen.set(screen.nextScreen)
+          doTransition(CurrentScreen.get, nextScreen)
+          CurrentScreen.set(nextScreen)
           OnFirstScreen.set(false)
 
           nextScreen match {
@@ -241,6 +300,7 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
 
             case _ =>
           }
+        }
         case xs => S.error(xs)
       }
     }
@@ -250,7 +310,14 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
     for{
       snapshot <- PrevSnapshot.is
     } {
+      val cur = if (CurrentScreen.set_?) CurrentScreen.get else Empty
       snapshot.restore()
+
+      if (CurrentScreen.set_?) {
+        doTransition(cur, CurrentScreen.get)
+      } else {
+        cur.foreach(_.transitionIntoFrom(Empty))
+      }
     }
   }
 
@@ -283,6 +350,26 @@ trait Wizard extends StatefulSnippet with Factory with ScreenWizardRendered {
     def nextScreen: Box[Screen] = calcScreenAfter(this)
 
     def isLastScreen = nextScreen.isEmpty
+
+    /**
+     * A notification that we are transitioning into
+     * this screen.  Override this method to perform
+     * some screen-specific actions
+     *
+     * @param from the screen we're coming from
+     */
+    def transitionIntoFrom(from: Box[Screen]) {
+    }
+
+    /**
+     * A notification that we are transitioning out of
+     * this screen.  Override this method to perform
+     * some screen-specific actions
+     *
+     * @param to the screen we're transitioning to
+     */
+    def transitionOutOfTo(to: Box[Screen]) {
+    }
 
     /**
      * By default, are all the fields on this screen on the confirm screen?

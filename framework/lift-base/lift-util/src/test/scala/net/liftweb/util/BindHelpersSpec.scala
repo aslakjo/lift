@@ -91,6 +91,12 @@ object BindHelpersSpec extends Specification  {
     "replace a node named 'namespace:bindparam name' in a NodeSeq with the Symbol value of the BindParam" in {
       bind("user", <t><user:tag>replacethis</user:tag></t>, "tag" -> 'world) must ==/(<t>world</t>)
     }
+
+
+    "replace a node named 'namespace:bindparam name' in a NodeSeq with the Symbol value of the BindParam via lift:bind attribute" in {
+      bind("user", <t><div lift:bind="user:tag">replacethis</div></t>, "tag" -> 'world) must ==/(<t>world</t>)
+    }
+
     "replace a node named 'namespace:bindparam name' in a NodeSeq with the NodeSeq value of the BindParam" in {
       bind("user", <user:tag>replacethis</user:tag>, "tag" -> <world></world>) must ==/(<world></world>)
     }
@@ -198,6 +204,20 @@ object BindHelpersSpec extends Specification  {
         e => e.attribute("id").
         filter(_.text == "3").map(i => e)
       } must_== Empty
+    }
+  }
+
+  "replaceIdNode" should {
+    "replace a node" in {
+      Helpers.replaceIdNode(<foo><bar id="dog"/></foo>,
+                            "dog",
+                            <baz/>) must ==/ (<foo><baz/></foo>)
+    }
+
+    "Ignore if no id match" in {
+      Helpers.replaceIdNode(<foo><bar/></foo>,
+                            "dog",
+                            <baz/>) must ==/ (<foo><bar/></foo>)
     }
   }
 
@@ -334,14 +354,135 @@ object CssBindHelpersSpec extends Specification  {
       ("#foo" #> "hello")(<b><span id="foo"/></b>) must ==/ (<b>hello</b>)
     }
 
+    "Compound selector" in {
+      val res = 
+      (".foo [href]" #> "http://dog.com" & ".bar [id]" #> "moo").apply(
+        <a class="foo bar" href="#"/>)
+      (res \ "@href").text must_== "http://dog.com"
+      (res \ "@id").text must_== "moo"
+    }
+
 
     "substitute a String by id" in {
       ("#foo" replaceWith "hello")(<b><span id="foo"/></b>) must ==/ (<b>hello</b>)
     }
 
+    "Select a node" in {
+      ("#foo ^^" #> "hello")(<div><span id="foo"/></div>) must ==/ (<span id="foo"/>)
+    }
+
+
+    "Select a node and transform stuff" in {
+      val ret = ("#foo ^^" #> "hello" &
+                 "span [id]" #> "bar")(<span id="foo"/>)
+
+      ret(0).asInstanceOf[Elem].label must_== "span"
+      ret.length must_== 1
+      (ret \ "@id").text must_== "bar"
+    }
+
+
+    "Select a node and transform stuff deeply nested" in {
+      val ret = ("#foo ^^" #> "hello" &
+                 "span [id]" #> "bar")(<div><div><span id="foo"/></div></div>)
+
+      ret(0).asInstanceOf[Elem].label must_== "span"
+      ret.length must_== 1
+      (ret \ "@id").text must_== "bar"
+    }
+
+
+    "Select a node and transform stuff deeply nested 2" in {
+      val ret = ("#foo ^^" #> "hello" &
+                 "span [id]" #> "bar")(<div><div><span id="foo2"/><span id="foo3"/><span dog="woof" id="foo"/></div></div>)
+
+      ret(0).asInstanceOf[Elem].label must_== "span"
+      ret.length must_== 1
+      (ret \ "@id").text must_== "bar"
+      (ret \ "@dog").text must_== "woof"
+    }
+
+
+
     "substitute multiple Strings by id" in {
       ("#foo" #> "hello" &
      "#baz" #> "bye")(<b><div id="baz">Hello</div><span id="foo"/></b>) must ==/ (<b>{Text("bye")}{Text("hello")}</b>)
+    }
+
+    "bind href and None content" in {
+      val opt: Option[String] = None
+      val res = ("top *" #> opt &
+                 "top [href]" #> "frog")(<top>cat</top>)
+
+      res.length must_== 0
+    }
+
+    "bind href and Some content" in {
+      val opt: Option[String] = Some("Dog")
+      val res = ("top *" #> opt &
+                 "top [href]" #> "frog")(<top>cat</top>)
+
+      res.text must_== "Dog"
+      (res \ "@href").text.mkString must_== "frog"
+    }
+
+    "bind href and Some content with multiple attrs" in {
+      val opt: Option[String] = Some("Dog")
+      val res = ("top *" #> opt &
+                 "top [meow]" #> "woof" &
+                 "top [href]" #> "frog")(<top href="#">cat</top>)
+
+      res.text must_== "Dog"
+      (res \ "@href").text.mkString must_== "frog"
+      (res \ "@meow").text.mkString must_== "woof"
+    }
+
+    "option transform on *" in {
+      val opt: Option[String] = None
+      val res = ("* *" #> opt.map(ignore => "Dog"))(<top>cat</top>)
+      res.length must_== 0
+    }
+
+    "append attribute to a class with spaces" in {
+      val stuff = List("a", "b")
+      val res = ("* [class+]" #> stuff)(<top class="q">cat</top>)
+      (res \ "@class").text must_== "q a b"
+    }
+
+    "append attribute to an href" in {
+      val stuff = List("&a=b", "&b=d")
+      val res = ("* [href+]" #> stuff)(<top href="q?z=r">cat</top>)
+      (res \ "@href").text must_== "q?z=r&a=b&b=d"
+    }
+
+    "option transform on *" in {
+      val opt: Option[Int] = Full(44)
+      val res = ("* *" #> opt.map(ignore => "Dog"))(<top>cat</top>)
+      res must ==/ (<top>Dog</top>)
+    }
+
+
+    "option transform on *" in {
+      val opt: Box[String] = Empty
+      val res = ("* *" #> opt.map(ignore => "Dog"))(<top>cat</top>)
+      res.length must_== 0
+    }
+
+    "option transform on *" in {
+      val opt: Box[Int] = Some(44)
+      val res = ("* *" #> opt.map(ignore => "Dog"))(<top>cat</top>)
+      res must ==/ (<top>Dog</top>)
+    }
+
+    "transform on *" in {
+      val res = ("* *" #> "Dog")(<top>cat</top>)
+      res must ==/ (<top>Dog</top>)
+    }
+
+    "transform on li" in {
+      val res = ("li *" #> List("Woof", "Bark") & ClearClearable)(
+        <ul><li>meow</li><li class="clearable">a</li><li class="clearable">a</li></ul>)
+      res must ==/ (<ul><li>Woof</li><li>Bark</li></ul>)
     }
 
     "substitute multiple Strings by id" in {
@@ -657,6 +798,9 @@ object CheckTheImplicitConversionsForToCssBindPromoter {
   "foo" #> false
 
   "bar" #> List("1","2","3").map(s => "baz" #> s)
+
+  "bar" #> Full(1).map(s => ("baz" #> s): CssBindFunc)
+  "bar" #> Some(1).map(s => ("baz" #> s): CssBindFunc)
 
 
 

@@ -25,6 +25,9 @@ import scala.collection.mutable.{ListBuffer}
 import scala.xml._
 import net.liftweb.http.js.{JsExp, JE, JsObj}
 import net.liftweb.http.{SHtml, Req, LiftResponse, LiftRules}
+import net.liftweb.json.{JsonParser, Printer}
+import net.liftweb.json.JsonAST._
+import net.liftweb.record.FieldHelpers.expectedA
 import _root_.java.lang.reflect.Method
 import field._
 import Box._
@@ -38,6 +41,7 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
   self: BaseRecord =>
 
   private var fieldList: List[FieldHolder] = Nil
+  private var fieldMap: Map[String, FieldHolder] = Map.empty
 
   private var lifecycleCallbacks: List[(String, Method)] = Nil
 
@@ -111,27 +115,21 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
   this.runSafe {
     val tArray = new ListBuffer[FieldHolder]
 
-    lifecycleCallbacks = for (v <- rootClass.getMethods.toList
-                              if v.getName != "meta" && isLifecycle(v)) yield (v.getName, v)
+    val methods = rootClass.getMethods
 
-    introspect(this, rootClass.getMethods) {
+    lifecycleCallbacks = (for (v <- methods
+                              if v.getName != "meta" && isLifecycle(v)) yield (v.getName, v)).toList
+
+    introspect(this, methods) {
       case (v, mf) => tArray += FieldHolder(mf.name, v, mf)
     }
-
-    def findPos(in: AnyRef): Box[Int] = {
-      tArray.toList.zipWithIndex.filter(mft => in eq mft._1.field) match {
-        case Nil => Empty
-        case x :: xs => Full(x._2)
-      }
+    
+    fieldList = {
+      val ordered = fieldOrder.flatMap(f => tArray.find(_.metaField == f))
+      ordered ++ (tArray -- ordered)
     }
-
-    val resArray = new ListBuffer[FieldHolder]
-
-    fieldOrder.foreach(f => findPos(f).foreach(pos => resArray += tArray.remove(pos)))
-
-    tArray.foreach(mft => resArray += mft)
-
-    fieldList = resArray.toList
+    
+    fieldMap = Map() ++ fieldList.map(i => (i.name, i))
   }
 
   /**
@@ -142,10 +140,10 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
   /**
    * Creates a new record
    */
-  final def createRecord: BaseRecord = {
+  def createRecord: BaseRecord = {
     val rec = instantiateRecord
     rec runSafe {
-      introspect(rec, rec.getClass.getMethods) {case (v, mf) =>}
+      fieldList.foreach(fh => fh.field(rec).setName_!(fh.name))
     }
     rec
   }
@@ -166,13 +164,12 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
                                         newValue: Box[FieldType]): BaseRecord = {
     val rec = createRecord
 
-    for (f <- fieldList) {
-      if (f.name == field.name)
-        fieldByName(f.name, rec).map(recField => recField.asInstanceOf[Field[FieldType, BaseRecord]].setBox(newValue))
+    for (fh <- fieldList) {
+      val recField = fh.field(rec)
+      if (fh.name == field.name)
+        recField.asInstanceOf[Field[FieldType, BaseRecord]].setBox(newValue)
       else
-        fieldByName(f.name, rec).map(recField =>
-            fieldByName(f.name, original).map(m => recField.setFromAny(m.valueBox))
-          )
+        recField.setFromAny(fh.field(original).valueBox)
     }
 
     rec
@@ -184,8 +181,7 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    * @param inst - th designated Record
    * @return a NodeSeq
    */
-  def toXHtml(inst: BaseRecord): NodeSeq = fieldList.flatMap(holder =>
-    fieldByName(holder.name, inst).map(_.toXHtml).openOr(NodeSeq.Empty) ++ Text("\n"))
+  def toXHtml(inst: BaseRecord): NodeSeq = fieldList.flatMap(_.field(inst).toXHtml ++ Text("\n"))
 
 
   /**
@@ -197,10 +193,7 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
   def validate(inst: BaseRecord): List[FieldError] = {
     foreachCallback(inst, _.beforeValidation)
     try{
-	    fieldList.flatMap(holder => inst.fieldByName(holder.name) match {
-          case Full(field) => field.validate
-          case _           => Nil
-        })
+	    fieldList.flatMap(_.field(inst).validate)
     } finally {
       foreachCallback(inst, _.afterValidation)
     }
@@ -213,8 +206,20 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    * @return JsObj
    */
   def asJSON(inst: BaseRecord): JsObj = {
-    JsObj((for (holder <- fieldList;
-                field <- inst.fieldByName(holder.name)) yield (field.name, field.asJs)):_*)
+    val tups = fieldList.map{ fh =>
+      val field = fh.field(inst)
+      field.name -> field.asJs
+    }
+    JsObj(tups:_*)
+  }
+  
+  /**
+   * Retuns the JSON representation of <i>inst</i> record, converts asJValue to JsObj
+   *
+   * @return a JsObj
+   */
+  def asJsExp(inst: BaseRecord): JsExp = new JsExp {
+    lazy val toJsCmd = Printer.compact(render(asJValue(inst)))
   }
 
   /**
@@ -245,6 +250,49 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
       case failure => failure.asA[Unit]
     }
 
+  /** Encode a record instance into a JValue */
+  def asJValue(rec: BaseRecord): JObject = {
+    JObject(fields(rec).map(f => JField(f.name, f.asJValue)))
+  }
+
+  /** Create a record by decoding a JValue which must be a JObject */
+  def fromJValue(jvalue: JValue): Box[BaseRecord] = {
+    val inst = createRecord
+    setFieldsFromJValue(inst, jvalue) map (_ => inst)
+  }
+
+  /** Attempt to decode a JValue, which must be a JObject, into a record instance */
+  def setFieldsFromJValue(rec: BaseRecord, jvalue: JValue): Box[Unit] = {
+    def fromJFields(jfields: List[JField]): Box[Unit] = {
+      for {
+        jfield <- jfields
+        field <- rec.fieldByName(jfield.name)
+      } field.setFromJValue(jfield.value)
+
+      Full(())
+    }
+
+    jvalue match {
+      case JObject(jfields) => fromJFields(jfields)
+      case other => expectedA("JObject", other)
+    }
+  }
+
+  /**
+   * Create a record with fields populated with values from the JSON construct
+   *
+   * @param json - The stringified JSON object
+   * @return Box[BaseRecord]
+   */
+  def fromJsonString(json: String): Box[BaseRecord] = {
+    val inst = createRecord
+    setFieldsFromJsonString(inst, json) map (_ => inst)
+  }
+
+  /** Set from a Json String using the lift-json parser **/
+  def setFieldsFromJsonString(inst: BaseRecord, json: String): Box[Unit] =
+    setFieldsFromJValue(inst, JsonParser.parse(json))
+
   protected def foreachCallback(inst: BaseRecord, f: LifecycleCallbacks => Any) {
     inst match {
       case (lc: LifecycleCallbacks) => f(lc)
@@ -263,8 +311,7 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
   def toForm(inst: BaseRecord): NodeSeq = {
     formTemplate match {
       case Full(template) => toForm(inst, template)
-      case _ => fieldList.flatMap(holder => fieldByName(holder.name, inst).
-                                      flatMap(_.toForm).openOr(NodeSeq.Empty) ++ Text("\n"))
+      case _ => fieldList.flatMap(_.field(inst).toForm.openOr(NodeSeq.Empty) ++ Text("\n"))
     }
   }
 
@@ -308,8 +355,6 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
     }
   }
 
-  private def ??(meth: Method, inst: BaseRecord) = meth.invoke(inst).asInstanceOf[Field[_, BaseRecord]]
-
   /**
    * Get a field by the field name
    * @param fieldName -- the name of the field to get
@@ -318,8 +363,7 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    * @return Box[The Field] (Empty if the field is not found)
    */
   def fieldByName(fieldName: String, inst: BaseRecord): Box[Field[_, BaseRecord]] = {
-    Box(fieldList.find(f => f.name == fieldName)).
-    map(holder => ??(holder.method, inst).asInstanceOf[Field[_, BaseRecord]])
+    Box(fieldMap.get(fieldName).map(_.field(inst)))
   }
 
   /**
@@ -373,13 +417,10 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    * @param inst - The record to populate
    * @param req - The Req to read from
    */
-  def setFieldsFromReq(inst: BaseRecord, req: Req): Box[Unit] = {
-    for(fieldHolder <- fieldList;
-        field <- inst.fieldByName(fieldHolder.name)
-    ) yield {
-      field.setFromAny(req.param(field.name))
+  def setFieldsFromReq(inst: BaseRecord, req: Req) {
+    for(fh <- fieldList){
+      fh.field(inst).setFromAny(req.param(fh.name))
     }
-    Full(inst)
   }
 
   /**
@@ -396,21 +437,18 @@ trait MetaRecord[BaseRecord <: Record[BaseRecord]] {
    *
    * @see Record
    */
-  def metaFields() : List[Field[_, BaseRecord]] = fieldList.map(fh => fh.field)
+  def metaFields() : List[Field[_, BaseRecord]] = fieldList.map(_.metaField)
 
   /**
    * Obtain the fields for a particlar Record or subclass instance by passing
    * the instance itself.
    * (added 14th August 2009, Tim Perrett)
    */
-  def fields(rec: BaseRecord) : List[Field[_, BaseRecord]] =
-    for(fieldHolder <- fieldList;
-      field <- rec.fieldByName(fieldHolder.name)
-    ) yield {
-      field
-    }
+  def fields(rec: BaseRecord) : List[Field[_, BaseRecord]] = fieldList.map(_.field(rec))
 
-  case class FieldHolder(name: String, method: Method, field: Field[_, BaseRecord])
+  case class FieldHolder(name: String, method: Method, metaField: Field[_, BaseRecord]) {
+    def field(inst: BaseRecord): Field[_, BaseRecord] = method.invoke(inst).asInstanceOf[Field[_, BaseRecord]]
+  }
 }
 
 trait LifecycleCallbacks {

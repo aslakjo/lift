@@ -32,8 +32,8 @@
   -->
   <parent>
     <groupId>net.liftweb</groupId>
-    <artifactId>lift-parent_2.8.0</artifactId>
-    <version>2.2-M1</version>
+    <artifactId>lift-parent_2.8.1</artifactId>
+    <version>2.3-SNAPSHOT</version>
     <relativePath>resources/lift-parent/pom.xml</relativePath>
   </parent>
   <artifactId>lift</artifactId>

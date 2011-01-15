@@ -36,7 +36,7 @@ sealed trait ParamHolder {
   def name: String
 }
 @serializable
-case class NormalParamHolder(name: String, value: String) extends ParamHolder
+final case class NormalParamHolder(name: String, value: String) extends ParamHolder
 @serializable
 abstract class FileParamHolder(val name: String, val mimeType: String,
                                val fileName: String) extends ParamHolder
@@ -150,8 +150,6 @@ object Req {
       case Full(resp) => processRewrite(resp.path, params ++ resp.params)
     }
 
-
-
     // val (uri, path, localSingleParams) = processRewrite(tmpUri, tmpPath, TreeMap.empty)
     val rewritten = processRewrite(tmpPath, Map.empty)
 
@@ -164,11 +162,11 @@ object Req {
     val contentType = request.contentType
 
     //    val (paramNames: List[String], params: Map[String, List[String]], files: List[FileParamHolder], body: Box[Array[Byte]]) =
-    val paramCalculator = () => {
 
-      // calculate the query parameters
-      lazy val queryStringParam:  (List[String], Map[String, List[String]]) = {
-        val params: List[(String, String)] =
+          
+    // calculate the query parameters
+    lazy val queryStringParam:  (List[String], Map[String, List[String]]) = {
+      val params: List[(String, String)] =
         for {
           queryString <- request.queryString.toList
           nameVal <- queryString.split("&").toList.map(_.trim).filter(_.length > 0)
@@ -177,42 +175,71 @@ object Req {
             case n :: v :: _ => Full((urlDecode(n), urlDecode(v)))
             case n :: _ => Full((urlDecode(n), ""))
           }} yield (name, value)
-
-        val names: List[String] = params.map(_._1).removeDuplicates
-        val nvp: Map[String, List[String]] = params.foldLeft(Map[String, List[String]]()) {
-          case (map, (name, value)) => map + (name -> (map.getOrElse(name, Nil) ::: List(value)))
-        }
-
-        (names, nvp)
+            
+            val names: List[String] = params.map(_._1).removeDuplicates
+      val nvp: Map[String, List[String]] = params.foldLeft(Map[String, List[String]]()) {
+        case (map, (name, value)) => map + (name -> (map.getOrElse(name, Nil) ::: List(value)))
       }
+      
+      (names, nvp)
+    }
 
+    // make this a thunk so it only gets calculated once
+    lazy val paramCalcInfo: ParamCalcInfo = {
+      // post/put of XML or JSON... eagerly read the stream
       if ((reqType.post_? ||
            reqType.put_?) && contentType.dmap(false){
 	_.toLowerCase match {
 	  case x => 
 	    x.startsWith("text/xml") || 
+	    x.startsWith("application/xml") || 
 	  x.startsWith("text/json") ||
 	  x.startsWith("application/json")
 	}}) {
-        ParamCalcInfo(queryStringParam._1, queryStringParam._2 ++ localParams, Nil, tryo(readWholeStream(request.inputStream)))
+        ParamCalcInfo(queryStringParam._1, 
+                      queryStringParam._2 ++ localParams, 
+                      Nil, 
+                      tryo(readWholeStream(request.inputStream)))
+        // it's multipart
       } else if (request multipartContent_?) {
         val allInfo = request extractFiles
+        
+        val normal: List[NormalParamHolder] = 
+          allInfo.flatMap {
+            case v: NormalParamHolder => List(v)
+            case _ => Nil}
 
-        val normal: List[NormalParamHolder] = allInfo.flatMap {case v: NormalParamHolder => List(v) case _ => Nil}
-        val files: List[FileParamHolder] = allInfo.flatMap {case v: FileParamHolder => List(v) case _ => Nil}
-
+        val files: List[FileParamHolder] = allInfo.flatMap {
+          case v: FileParamHolder => List(v)
+          case _ => Nil}
+        
         val params = normal.foldLeft(eMap)((a, b) =>
           a + (b.name -> (a.getOrElse(b.name, Nil) ::: List(b.value))))
-
-        ParamCalcInfo((queryStringParam._1 ::: normal.map(_.name)).removeDuplicates, queryStringParam._2 ++ localParams ++ params, files, Empty)
+        
+        ParamCalcInfo((queryStringParam._1 ::: 
+                       normal.map(_.name)).removeDuplicates, 
+                      queryStringParam._2 ++ localParams ++
+                      params, files, Empty)
+        // it's a GET
       } else if (reqType.get_?) {
-        ParamCalcInfo(queryStringParam._1, queryStringParam._2 ++ localParams, Nil, Empty)
-      } else if (contentType.dmap(false)(_.toLowerCase.startsWith("application/x-www-form-urlencoded"))) {
-        val params = localParams ++ (request.params.sort {(s1, s2) => s1.name < s2.name}).map(n => (n.name, n.values))
+        ParamCalcInfo(queryStringParam._1,
+                      queryStringParam._2 ++ localParams, Nil, Empty)
+      } else if (contentType.dmap(false)(_.toLowerCase.
+                                         startsWith("application/x-www-form-urlencoded"))) {
+        val params = localParams ++ (request.params.sort
+                                     {(s1, s2) => s1.name < s2.name}).
+                                           map(n => (n.name, n.values))
         ParamCalcInfo(request paramNames, params, Nil, Empty)
       } else {
-        ParamCalcInfo(queryStringParam._1, queryStringParam._2 ++ localParams, Nil, tryo(readWholeStream(request inputStream)))
+        ParamCalcInfo(queryStringParam._1, 
+                      queryStringParam._2 ++ localParams, 
+                      Nil, tryo(readWholeStream(request inputStream)))
       }
+    }
+
+
+    val paramCalculator: () => ParamCalcInfo = () => {
+      paramCalcInfo
     }
 
     val stateless = NamedPF.applyBox(rewritten.path.wholePath, statelessTest)
@@ -300,15 +327,115 @@ object Req {
   def unapply(in: Req): Option[(List[String], String, RequestType)] = Some((in.path.partPath, in.path.suffix, in.requestType))
 }
 
-case class ParamCalcInfo(paramNames: List[String],
-            params: Map[String, List[String]],
-            uploadedFiles: List[FileParamHolder],
-            body: Box[Array[Byte]])
+final case class ParamCalcInfo(paramNames: List[String],
+                               params: Map[String, List[String]],
+                               uploadedFiles: List[FileParamHolder],
+                               body: Box[Array[Byte]])
+
+
+/**
+ * Holds information about the content type and subtype including
+ * the q parameter and extension information.
+ */
+final case class ContentType(theType: String, 
+                             subtype: String, 
+                             order: Int,
+                             q: Box[Double], 
+                             extension: List[(String, String)]) extends Ordered[ContentType]
+  {
+    /**
+     * Compares this to another ContentType instance based on the q
+     * and if the q matches, compare based on specialization (* vs.
+     * explicit and then order.
+     */
+    def compare(that: ContentType): Int = ((that.q openOr 1d) compare (q openOr 1d)) match {
+      case 0 => 
+        def doDefault = {
+          order compare that.order
+        }
+
+        (theType, that.theType, subtype, that.subtype) match {
+          case ("*", "*", _, _) => doDefault
+          case ("*", _, _, _) => 1
+          case (_, "*", _, _) => -1
+          case (_, _, "*", "*") => doDefault
+          case (_, _, "*", _) => 1
+          case (_, _, _, "*") => -1
+          case _ => doDefault
+        }
+      case x => x
+    }
+
+    /**
+     * Does this ContentType match the String including
+     * wildcard support
+     */
+    def matches(contentType: (String, String)): Boolean =
+      (theType == "*" || (theType == contentType._1)) &&
+    (subtype == "*" || subtype == contentType._2)
+    
+    /**
+     * Is it a wildcard
+     */
+    def wildCard_? = theType == "*" && subtype == "*"
+  }
+
+/**
+ * The ContentType companion object that has helper methods
+ * for parsing Accept headers and other things that
+ * contain multiple ContentType information.
+ */
+object ContentType {
+  /**
+   * Parse the String into a series of ContentType instances,
+   * returning the multiple ContentType instances
+   */
+  def parse(str: String): List[ContentType] = 
+    (for {
+      (part, index) <- str.charSplit(',').
+      map(_.trim).zipWithIndex // split at comma
+      content <- parseIt(part, index)
+    } yield content).sort(_ < _)
+
+  private object TwoType {
+    def unapply(in: String): Option[(String, String)] = 
+      in.charSplit('/') match {
+        case a :: b :: Nil => Some(a -> b)
+        case _ => None
+      }
+  }
+
+
+  private object EqualsSplit {
+    private def removeQuotes(s: String) = 
+      if (s.startsWith("\"") && s.endsWith("\"")) s.substring(1, s.length - 1)
+      else s
+
+    def unapply(in: String): Option[(String, String)] = in.roboSplit("=") match {
+      case a :: b :: Nil => Some(a -> removeQuotes(b))
+      case _ => None
+    }
+  }
+
+  private def parseIt(content: String, index: Int): Box[ContentType] = content.roboSplit(";") match {
+    case TwoType(typ, subType) :: xs => {
+      val kv = xs.flatMap(EqualsSplit.unapply) // get the key/value pairs
+      val q: Box[Double] = first(kv){
+        case (k, v) if k == "q" => Helpers.asDouble(v)
+        case _ => Empty
+      }
+      Full(ContentType(typ, subType, index, q, kv.filter{_._1 != "q"}))
+    }
+
+    case _ => Empty
+  }
+}
+
+
 
 /**
  * Contains request information
  */
-@serializable
 class Req(val path: ParsePath,
           val contextPath: String,
           val requestType: RequestType,
@@ -316,7 +443,7 @@ class Req(val path: ParsePath,
           val request: HTTPRequest,
           val nanoStart: Long,
           val nanoEnd: Long,
-          val stateless_? : Boolean,
+          _stateless_? : Boolean,
           private[http] val paramCalculator: () => ParamCalcInfo,
           private[http] val addlParams: Map[String, String]) extends HasParams
 {
@@ -343,16 +470,42 @@ class Req(val path: ParsePath,
                                                    _addlParams)
 
   /**
-   * Returns true if the content-type is text/xml
+   * Should the request be treated as stateless (no session created for it)?
    */
-  def xml_? = contentType != null && contentType.dmap(false)(_.toLowerCase.startsWith("text/xml"))
+  lazy val stateless_? = {
+    val ret = _stateless_? || (location.map(_.stateless_?) openOr false)
+    ret
+  }
 
+  /**
+   * Returns true if the content-type is text/xml or application/xml
+   */
+  def xml_? = contentType != null && contentType.dmap(false){
+    _.toLowerCase match {
+      case x if x.startsWith("text/xml") => true
+      case x if x.startsWith("application/xml") => true
+      case _ => false
+    }
+  }
+
+  /**
+   * Returns true if the content-type is text/json or application/json
+   */
   def json_? = contentType != null && contentType.dmap(false){
     _.toLowerCase match {
       case x if x.startsWith("text/json") => true
       case x if x.startsWith("application/json") => true
       case _ => false
     }
+  }
+
+  /**
+   * Make the servlet session go away
+   */
+  def destroyServletSession() {
+    for {
+      httpReq <- Box !! request
+    } httpReq.destroyServletSession()
   }
 
   def snapshot = {
@@ -399,7 +552,10 @@ class Req(val path: ParsePath,
   lazy val ParamCalcInfo(paramNames: List[String],
             _params: Map[String, List[String]],
             uploadedFiles: List[FileParamHolder],
-            body: Box[Array[Byte]]) = paramCalculator()
+            body: Box[Array[Byte]]) = {
+    val ret = paramCalculator()
+    ret
+  }
 
   lazy val params: Map[String, List[String]] = addlParams.foldLeft(_params){
     case (map, (key, value)) => map + (key -> (value :: map.getOrElse(key, Nil)))
@@ -409,6 +565,15 @@ class Req(val path: ParsePath,
     case null => Nil
     case ca => ca.toList
   }
+
+  /**
+   * Get the session ID if there is one without creating on
+   */
+  def sessionId: Box[String] =
+    for {
+      httpRequest <- Box !! request
+      sid <- httpRequest.sessionId
+    } yield sid
 
   lazy val json: Box[JsonAST.JValue] = 
     if (!json_?) Empty
@@ -590,64 +755,135 @@ class Req(val path: ParsePath,
        uah <- request.header("User-Agent"))
   yield uah
 
-  lazy val isIE6: Boolean = (userAgent.map(_.indexOf("MSIE 6") >= 0)) openOr false
-  lazy val isIE7: Boolean = (userAgent.map(_.indexOf("MSIE 7") >= 0)) openOr false
-  lazy val isIE8: Boolean = (userAgent.map(_.indexOf("MSIE 8") >= 0)) openOr false
-  lazy val isIE = isIE6 || isIE7 || isIE8
+  lazy val ieVersion: Box[Int] = {
+    val re = """MSIE ([0-9]+)""".r
+    for {
+      ua <- userAgent
+      m = re.pattern.matcher(ua)
+      ver <- if (m.find) Helpers.asInt(m.group(1)) else Empty
+    } yield ver
+  }
 
-  lazy val isSafari2: Boolean = (userAgent.map(s => s.indexOf("Safari/") >= 0 &&
-                                               s.indexOf("Version/2.") >= 0)) openOr false
+  lazy val isIE6: Boolean = ieVersion.map(_ == 6) openOr false
+  lazy val isIE7: Boolean = ieVersion.map(_ == 7) openOr false
+  lazy val isIE8: Boolean = ieVersion.map(_ == 8) openOr false
+  lazy val isIE9: Boolean = ieVersion.map(_ == 9) openOr false
+  lazy val isIE = ieVersion.map(_ >= 6) openOr false
 
-  lazy val isSafari3: Boolean = (userAgent.map(s => s.indexOf("Safari/") >= 0 &&
-                                               s.indexOf("Version/3.") >= 0)) openOr false
-  lazy val isSafari4: Boolean = (userAgent.map(s => s.indexOf("Safari/") >= 0 &&
-                                               s.indexOf("Version/4.") >= 0)) openOr false
-  lazy val isSafari5: Boolean = (userAgent.map(s => s.indexOf("Safari/") >= 0 &&
-                                               s.indexOf("Version/5.") >= 0)) openOr false
+  lazy val safariVersion: Box[Int] = {
+    val re = """Version.([0-9]+)[.0-9]+ Safari\/""".r
+    for {
+      ua <- userAgent
+      m = re.pattern.matcher(ua)
+      ver <- if (m.find) Helpers.asInt(m.group(1)) else Empty
+    } yield ver
+  }
 
-  def isSafari3_+ = isSafari3 || isSafari4 || isSafari5
-  def isSafari = isSafari2 || isSafari3_+
+
+
+  def isSafari2: Boolean = false
+
+  lazy val isSafari3: Boolean = safariVersion.map(_ == 3) openOr false
+  lazy val isSafari4: Boolean = safariVersion.map(_ == 4) openOr false
+  lazy val isSafari5: Boolean = safariVersion.map(_ == 5) openOr false
+  
+  def isSafari3_+ = safariVersion.map(_ >= 3) openOr false
+  def isSafari = safariVersion.isDefined
 
   lazy val isIPhone = isSafari && (userAgent.map(s => s.indexOf("(iPhone;") >= 0) openOr false)
 
-  lazy val isFirefox2: Boolean = (userAgent.map(_.indexOf("Firefox/2") >= 0)) openOr false
-  lazy val isFirefox3: Boolean = (userAgent.map(_.indexOf("Firefox/3") >= 0)) openOr false
-  lazy val isFirefox35: Boolean = (userAgent.map(_.indexOf("Firefox/3.5") >= 0)) openOr false
-  lazy val isFirefox36: Boolean = (userAgent.map(_.indexOf("Firefox/3.6") >= 0)) openOr false
-  lazy val isFirefox40: Boolean = (userAgent.map(_.indexOf("Firefox/4") >= 0)) openOr false
+  lazy val firefoxVersion: Box[Double] = {
+    val re = """Firefox.([1-9][0-9]*\.[0-9])""".r   
 
-  def isFirefox35_+ : Boolean = isFirefox35 || isFirefox36  || isFirefox40
+    for {
+      ua <- userAgent
+      m = re.pattern.matcher(ua)
+      ver <- if (m.find) Helpers.tryo(m.group(1).toDouble) else Empty
+    } yield ver
+  }
 
-  def isFirefox = isFirefox2 || isFirefox3 || isFirefox35_+
+  lazy val isFirefox2: Boolean = firefoxVersion.map(v => v >= 2d && v < 3d) openOr false
+  lazy val isFirefox3: Boolean = firefoxVersion.map(v => v >= 3d && v < 3.5d) openOr false
+  lazy val isFirefox35: Boolean = firefoxVersion.map(v => v >= 3.5d && v < 3.6d) openOr false
+  lazy val isFirefox36: Boolean = firefoxVersion.map(v => v >= 3.6d && v < 4d) openOr false
+  lazy val isFirefox40: Boolean = firefoxVersion.map(v => v >= 4d) openOr false
 
-  lazy val isChrome2 = (userAgent.map(_.indexOf("Chrome/2.") >= 0)) openOr false
-  lazy val isChrome3 = (userAgent.map(_.indexOf("Chrome/3.") >= 0)) openOr false
-  lazy val isChrome4 = (userAgent.map(_.indexOf("Chrome/4.") >= 0)) openOr false
-  lazy val isChrome5 = (userAgent.map(_.indexOf("Chrome/5.") >= 0)) openOr false
-  lazy val isChrome6 = (userAgent.map(_.indexOf("Chrome/6.") >= 0)) openOr false
+  def isFirefox35_+ : Boolean = firefoxVersion.map(_ >= 3.5d) openOr false
 
-  def isChrome3_+ = isChrome3 || isChrome4 || isChrome5 || isChrome6
+  def isFirefox = firefoxVersion.isDefined
 
-  def isChrome = isChrome2 || isChrome3 || isChrome4 || isChrome5 || isChrome6
+
+  lazy val chromeVersion: Box[Double] = {
+    val re = """Chrome.([1-9][0-9]*\.[0-9])""".r   
+
+    for {
+      ua <- userAgent
+      m = re.pattern.matcher(ua)
+      ver <- if (m.find) Helpers.tryo(m.group(1).toDouble) else Empty
+    } yield ver
+  }
+
+  lazy val isChrome2 = chromeVersion.map(v => v >= 2d && v < 3d) openOr false
+  lazy val isChrome3 = chromeVersion.map(v => v >= 3d && v < 4d) openOr false
+  lazy val isChrome4 = chromeVersion.map(v => v >= 4d && v < 5d) openOr false
+  lazy val isChrome5 = chromeVersion.map(v => v >= 5d && v < 6d) openOr false
+  lazy val isChrome6 = chromeVersion.map(v => v >= 6d && v < 7d) openOr false
+
+  def isChrome3_+ = chromeVersion.map(_ >= 3d) openOr false
+
+  def isChrome = chromeVersion.isDefined
 
   lazy val isOpera9: Boolean = (userAgent.map(s => s.indexOf("Opera/9.") >= 0) openOr false)
 
   def isOpera = isOpera9
 
-  lazy val acceptsJavaScript_? = {
-    request.headers.filter(_.name.toLowerCase == "accept").
-    find(h => h.values.find(s =>
-        s.toLowerCase.indexOf("text/javascript") >= 0 ||
-        s.toLowerCase.indexOf("application/javascript") >= 0 ||
-        s.toLowerCase.indexOf("*/*") >= 0
-      ).isDefined).isDefined
+  /**
+   * the accept header
+   */
+  lazy val accepts: Box[String] = {
+    request.headers.toList.
+    filter(_.name equalsIgnoreCase "accept").flatMap(_.values) match {
+      case Nil => Empty
+      case xs => Full(xs.mkString(", "))
+    }
   }
+    
+  /**
+   * What is the content type in order of preference by the requestor
+   * calculated via the Accept header
+   */
+  lazy val weightedAccept: List[ContentType] = accepts match {
+    case Full(a) => ContentType.parse(a)
+    case _ => Nil
+  }
+
+  /**
+   * Returns true if the request accepts XML
+   */
+  lazy val acceptsXml_? =
+    (weightedAccept.find(_.matches("text" -> "xml")) orElse
+     weightedAccept.find(_.matches("application" -> "xml"))).isDefined
+
+  /**
+   * Returns true if the request accepts JSON
+   */
+  lazy val acceptsJson_? =
+    (weightedAccept.find(_.matches("text" -> "json")) orElse
+     weightedAccept.find(_.matches("application" -> "json"))).isDefined
+
+  /**
+   * Returns true if the request accepts JavaScript
+   */
+  lazy val acceptsJavaScript_? = 
+    (weightedAccept.find(_.matches("text" -> "javascript")) orElse
+     weightedAccept.find(_.matches("application" -> "javascript"))).
+    isDefined
 
   def updateWithContextPath(uri: String): String = if (uri.startsWith("/")) contextPath + uri else uri
 }
 
-case class RewriteRequest(path: ParsePath, requestType: RequestType, httpRequest: HTTPRequest)
-case class RewriteResponse(path: ParsePath, params: Map[String, String], stopRewriting: Boolean)
+final case class RewriteRequest(path: ParsePath, requestType: RequestType, httpRequest: HTTPRequest)
+final case class RewriteResponse(path: ParsePath, params: Map[String, String], stopRewriting: Boolean)
 
 /**
  * The representation of an URI path

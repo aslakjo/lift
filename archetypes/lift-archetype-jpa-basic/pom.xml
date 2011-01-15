@@ -23,10 +23,10 @@
 
   <parent>
     <groupId>net.liftweb</groupId>
-    <artifactId>archetypes_2.8.0</artifactId>
-    <version>2.2-M1</version>
+    <artifactId>archetypes_2.8.1</artifactId>
+    <version>2.3-SNAPSHOT</version>
   </parent>
-  <artifactId>lift-archetype-jpa-basic_2.8.0</artifactId>
+  <artifactId>lift-archetype-jpa-basic_2.8.1</artifactId>
   <packaging>maven-archetype</packaging>
 
   <properties>

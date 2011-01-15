@@ -76,7 +76,9 @@ private[http] trait LiftMerge {
     val headChildren = new ListBuffer[Node]
     val bodyChildren = new ListBuffer[Node]
     val addlHead = new ListBuffer[Node]
+    addlHead ++= S.forHead()
     val addlTail = new ListBuffer[Node]
+    addlTail ++= S.atEndOfBody()
     val cometTimes = new ListBuffer[CometVersionPair]
     val rewrite = URLRewriter.rewriteFunc
     val fixHref = Req.fixHref
@@ -110,11 +112,23 @@ private[http] trait LiftMerge {
                 var bodyTail = false
 
                 v match {
-                  case e: Elem if e.label == "html" && !inHtml => htmlTag = e; inHtml = true && doMergy
-                  case e: Elem if e.label == "head" && inHtml && !inBody => headTag = e; inHead = true && doMergy; justHead = true && doMergy
-                  case e: Elem if e.label == "head" && inHtml && inBody => bodyHead = true && doMergy
-                  case e: Elem if e.label == "tail" && inHtml && inBody => bodyTail = true && doMergy
-                  case e: Elem if e.label == "body" && inHtml => bodyTag = e; inBody = true && doMergy; justBody = true && doMergy
+                  case e: Elem if e.label == "html" && 
+                  !inHtml => htmlTag = e; inHtml = true && doMergy
+
+                  case e: Elem if e.label == "head" && inHtml && 
+                  !inBody => headTag = e; 
+                  inHead = true && doMergy; justHead = true && doMergy
+
+                  case e: Elem if (e.label == "head" || 
+                                   e.label.startsWith("head_")) && 
+                  inHtml && inBody => bodyHead = true && doMergy
+
+                  case e: Elem if e.label == "tail" && inHtml && 
+                  inBody => bodyTail = true && doMergy
+
+                  case e: Elem if e.label == "body" && inHtml =>
+                    bodyTag = e; inBody = true && doMergy; 
+                  justBody = true && doMergy
 
                   case _ =>
                 }
@@ -190,6 +204,12 @@ private[http] trait LiftMerge {
                         "/" + LiftRules.cometScriptName())}
                 type="text/javascript"/>
         bodyChildren += nl
+      }
+
+      S.jsToAppend match {
+        case Nil => 
+        case x :: Nil => addlTail += js.JsCmds.Script(x)
+        case xs => addlTail += js.JsCmds.Script(xs.foldLeft(js.JsCmds.Noop)(_ & _))
       }
 
       for{

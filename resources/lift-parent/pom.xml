@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+
 
 <!--
   ~ Copyright 2009-2010 WorldWide Conferencing, LLC
@@ -37,8 +37,8 @@
     ~ The Basics
   -->
   <groupId>net.liftweb</groupId>
-  <artifactId>lift-parent_2.8.0</artifactId>
-  <version>2.2-M1</version>
+  <artifactId>lift-parent_2.8.1</artifactId>
+  <version>2.3-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <!--
@@ -291,7 +291,8 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>${project.build.sourceEncoding}</project.reporting.outputEncoding>
 
-    <scala.version>2.8.0</scala.version>
+    <scala.version>2.8.1</scala.version>
+    <specs.version>1.6.6</specs.version>
     <slf4j.version>1.6.1</slf4j.version>
     <!-- Note: logback.version must be compatible with slf4j.version -->
     <logback.version>0.9.26</logback.version>
@@ -321,6 +322,13 @@
         <artifactId>mail</artifactId>
         <version>1.4.1</version>
       </dependency>
+
+      <dependency>
+        <groupId>nu.validator.htmlparser</groupId>
+        <artifactId>htmlparser</artifactId>
+        <version>1.2.1</version>
+      </dependency>
+
       <dependency>
         <groupId>joda-time</groupId>
         <artifactId>joda-time</artifactId>
@@ -369,7 +377,7 @@
       <dependency>
         <groupId>net.databinder</groupId>
         <artifactId>dispatch-http_${scala.version}</artifactId>
-        <version>0.7.4</version>
+        <version>0.7.7</version>
       </dependency>
       <dependency>
         <groupId>net.jcip</groupId>
@@ -453,7 +461,7 @@
       <dependency>
         <groupId>org.squeryl</groupId>
         <artifactId>squeryl_${scala.version}</artifactId>
-        <version>0.9.4beta8-enums</version>
+        <version>0.9.4-RC3</version>
       </dependency>
       <dependency>
         <groupId>cglib</groupId>
@@ -577,7 +585,7 @@
       <dependency>
         <groupId>org.scala-tools.testing</groupId>
         <artifactId>specs_${scala.version}</artifactId>
-        <version>1.6.5</version>
+        <version>${specs.version}</version>
         <scope>test</scope>
       </dependency>
       <dependency>
@@ -722,7 +730,7 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-enforcer-plugin</artifactId>
-          <version>1.0-beta-1</version>
+          <version>1.0</version>
           <configuration>
             <rules>
               <requireMavenVersion>
@@ -815,7 +823,7 @@
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-site-plugin</artifactId>
-          <version>2.1.1</version>
+          <version>2.2</version>
           <configuration>
             <generateSitemap>true</generateSitemap>
           </configuration>
@@ -901,6 +909,12 @@
   <profiles>
     <profile>
       <id>lift-debug</id>
+      <activation>
+        <property>
+          <name>lift.debug</name>
+          <value>true</value>
+        </property>
+      </activation>
       <build>
         <plugins>
           <plugin>
@@ -920,10 +934,22 @@
     </profile>
     <profile>
       <id>lift-hudson</id>
+      <activation>
+        <property>
+          <name>lift.hudson</name>
+          <value>true</value>
+        </property>
+      </activation>
       <!-- no-op at top level -->
     </profile>
     <profile>
       <id>lift-release</id>
+      <activation>
+        <property>
+          <name>lift.release</name>
+          <value>true</value>
+        </property>
+      </activation>
       <!-- no-op at top level -->
     </profile>
   </profiles>
