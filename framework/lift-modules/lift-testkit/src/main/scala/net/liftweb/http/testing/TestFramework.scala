@@ -189,6 +189,8 @@ trait BaseGetPoster {
     capture(url, httpClient, poster)
   }
 
+  
+
   implicit def xmlToRequestEntity(body: NodeSeq): RequestEntity =
     new RequestEntity {
       val bytes = body.toString.getBytes("UTF-8")
@@ -273,6 +275,8 @@ trait BaseGetPoster {
     })
     capture(url, httpClient, poster)
   }
+
+  
 
   /**
    * Perform an HTTP PUT
@@ -697,7 +701,7 @@ trait Response {
    * @param label the label for the XML node to search for in the response
    * @param msg the String to report as an error
    * @param errorFunc the error reporting thing.
-   */
+   */                                     
   def \\(label: String, msg: => String)(implicit errorFunc: ReportFailure): SelfType
 
   /**
@@ -769,6 +773,7 @@ trait Response {
    */
   def !\(label: String, msg: => String)(implicit errorFunc: ReportFailure): SelfType
 
+
   /**
    * the Response has a foreach method for chaining in a for comprehension
    */
@@ -792,7 +797,49 @@ class HttpResponse(baseUrl: String,
                    theHttpClient: HttpClient) extends
   BaseResponse(baseUrl, code, msg, headers, body, theHttpClient) with
   ToResponse with TestResponse {
+
+  
+  def submitValues(values : (String, String)*):ResponseType ={
+      //val names = (xml.get \\ "input").map(_ \\ "@name")
+      val action = (xml.get \\ "form" \\ "@action").text.split(";").head
+      val cookie = headers("Set-Cookie").head.split(";").head
+      post(action, theHttpClient,List(("cookie" -> cookie)), values:_* )
   }
+
+  def submit(labelToValues: (Label, String)*):ResponseType ={
+    val labels = xml.get \\ "form" \\ "label"
+
+    val ids:Seq[(String, String)] = labelToValues.map(
+      l  => labels.find(
+          node => node.text.equals(l._1.label)
+        ) match {
+        case Some(label) => ((label \\ "@for").text, l._2)
+        case None => throw new NoLabelFound(l._1.label)
+      }
+    )
+
+
+    val valuesForSubmition = ids.map(id =>{
+      (xml.get \\ "input").find(node =>
+        (node \\ "@id").text.equals(id._1)
+      ) match {
+        case Some(node) =>{
+          val name:String = (node \\ "@name").text
+          (name, id._2)
+        }
+        case None => (id._1, id._2)
+      }
+    })
+
+    submitValues(valuesForSubmition:_*)
+  }
+
+}
+
+/**
+ * Represents a label that describes a form field
+ */
+case class Label(val label:String)
 
 /**
  * The response to an HTTP request, as long as the server responds with *SOMETHING*
@@ -812,6 +859,8 @@ class TheResponse(baseUrl: String,
 trait TestResponse extends Response {
   override type SelfType = HttpResponse
   override type FuncType = HttpResponse
+
+  
 }
 
 /**
@@ -916,6 +965,8 @@ abstract class BaseResponse(override val baseUrl: String,
     f(st)
     st
   }
+
+  
 }
 
 class CompleteFailure(val serverName: String, val exception: Box[Throwable]) extends TestResponse {
