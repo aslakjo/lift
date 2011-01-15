@@ -21,25 +21,31 @@ class TestKitXmlMatcher(val responseBox:Box[scala.xml.Elem] )(implicit reportFai
   protected def containsElement(element:Elem): Unit = {
      filter(responseBox.get, element)  match {
        case None => reportFailure.fail("Response '" + responseBox + "' did not match '" + element + "'")
-        case _ =>;
+       case _ => ;
     }
   }
 
   protected def filter(xml:Elem, element:Elem):Option[NodeSeq]= {
+    var matchingTag = xml \\ element.label
 
-    var remainding = xml  \\ element.label
+    if(matchingTag.isEmpty)
+      None
+    else
+      matchAttributes(matchingTag, element.attributes)
+  }
 
-    val attributes = element.attributes.asAttrMap
-    if(attributes.size > 0 )
-    {
-      val attribute = remainding \\ ("@" + attributes.head._1)
-      if(attribute.isEmpty)
-        None
-      else
-        remainding \\ ("@" + attributes.head._1) find {i=> true}
-    }
-    Some(remainding)
+  protected def matchAttributes(tag:NodeSeq, attributes:MetaData):Option[NodeSeq] ={
+    val matches = for( (attr,value) <- attributes.asAttrMap
+                      if ( (tag \\ new String("@" + attr)).text.equals(new String(value)))
+                  )
+                  yield tag
 
+    if(attributes.isEmpty)
+      Some(tag)
+    else if(matches.isEmpty)
+      None
+    else
+      Some(tag)
   }
 
   protected def isResponseValid= !responseBox.isEmpty
